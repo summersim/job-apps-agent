@@ -1,0 +1,12 @@
+[project]
+name = "legal-agent"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "httpx>=0.27",
+    "google-genai>=1.0",
+    "pypdf>=4.0",
+]
+
+[tool.vercel]
+entrypoint = "legal_agent.web:Handler"

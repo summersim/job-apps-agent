@@ -11,7 +11,7 @@ import asyncio
 from dataclasses import dataclass
 
 from .config import KEYWORDS
-from .profile import DEFAULT_PROFILE
+from .profile import load_profile
 from .scoring import score_all
 from .sources import build_sources, gather_all
 from .storage import Store
@@ -44,9 +44,10 @@ async def fetch_and_store(store: Store, *, per_keyword: int = 200,
     credentials — callers decide whether that's an exit or an HTTP 400.
     """
     sources, warnings = build_sources()
+    profile = load_profile(store)
 
     raw = await gather_all(sources, keywords or KEYWORDS, per_keyword=per_keyword)
-    kept = score_all(raw, DEFAULT_PROFILE)
+    kept = score_all(raw, profile)
     new, dup = store.upsert(kept)
 
     return FetchResult(raw=len(raw), kept=len(kept), new=new,

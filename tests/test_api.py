@@ -8,6 +8,7 @@ by the server, not just hidden in the UI.
 import pytest
 from conftest import make_posting
 
+from jobs_agent.profile import DEFAULT_PROFILE, load_profile
 from jobs_agent.web import api
 
 
@@ -96,3 +97,49 @@ def test_only_editable_documents_are_writable(store):
     api.post_documents(store, req(candidate_name="Jane", cv="malicious override"))
     assert store.get_document("candidate_name") == "Jane"
     assert store.get_document("cv") == ""
+
+
+# -- scoring profile ------------------------------------------------------
+
+def test_get_profile_returns_editable_text(store):
+    body = api.get_profile(store, api.Request()).body
+    assert "compliance analyst = 30" in body["target_titles"]
+    assert "head of" in body["title_blockers"]
+
+
+def test_saving_a_profile_persists_it(store):
+    res = api.post_profile(store, req(
+        target_titles="clerk = 10",
+        domain_terms="probate = 5",
+        title_blockers="senior",
+        experience_blockers="",
+    ))
+    assert res.status == 200
+    saved = load_profile(store)
+    assert saved.target_titles == {"clerk": 10}
+    assert saved.experience_blockers == []
+    # name/location aren't edited here, so they carry over
+    assert saved.name == DEFAULT_PROFILE.name
+
+
+def test_a_bad_line_saves_nothing(store):
+    res = api.post_profile(store, req(
+        target_titles="clerk = 10",
+        domain_terms="probate = five",
+    ))
+    assert res.status == 400
+    assert "Domain terms, line 1" in res.body["error"]
+    assert load_profile(store) == DEFAULT_PROFILE
+
+
+def test_an_empty_title_list_is_refused(store):
+    res = api.post_profile(store, req(target_titles="  \n# only a comment\n"))
+    assert res.status == 400
+    assert "drops everything" in res.body["error"]
+
+
+def test_reset_restores_the_defaults(store):
+    api.post_profile(store, req(target_titles="clerk = 10"))
+    assert load_profile(store) != DEFAULT_PROFILE
+    assert api.post_profile_reset(store, api.Request()).status == 200
+    assert load_profile(store) == DEFAULT_PROFILE

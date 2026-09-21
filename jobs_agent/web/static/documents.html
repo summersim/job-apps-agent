@@ -37,6 +37,32 @@
     <span id="doc-msg"></span>
   </div>
 
+  <div class="section-head">
+    <h2>Scoring profile</h2>
+    <div class="hint">What counts as a good match. Scores are recalculated on the next fetch — editing these does not rescore postings already in the queue.</div>
+  </div>
+
+  <label class="doc-label" for="target-titles">Target titles</label>
+  <div class="hint">One <code>term = weight</code> per line, matched as a substring of the job title. Only the highest-scoring match counts, so a title stuffed with synonyms can't inflate. A posting matching none of these is dropped.</div>
+  <textarea id="target-titles" class="weights" rows="14" spellcheck="false"></textarea>
+
+  <label class="doc-label" for="domain-terms">Domain terms</label>
+  <div class="hint">One <code>term = weight</code> per line, matched against the title and description. These stack, but the total is capped at 30 so keyword-stuffed adverts can't dominate.</div>
+  <textarea id="domain-terms" class="weights" rows="14" spellcheck="false"></textarea>
+
+  <label class="doc-label" for="title-blockers">Title blockers</label>
+  <div class="hint">One term per line. If any appears in the <em>title</em>, the posting is dropped outright. Seniority markers, not topics. Trailing spaces matter — <code>lead </code> avoids matching "leadership".</div>
+  <textarea id="title-blockers" class="weights" rows="10" spellcheck="false"></textarea>
+
+  <label class="doc-label" for="experience-blockers">Experience blockers</label>
+  <div class="hint">One term per line, matched against the description. A posting containing any of them is dropped.</div>
+  <textarea id="experience-blockers" class="weights" rows="12" spellcheck="false"></textarea>
+
+  <div class="save-row">
+    <button id="btn-save-profile" class="primary">Save scoring profile</button>
+    <button id="btn-reset-profile">Reset to defaults</button>
+    <span id="profile-msg"></span>
+  </div>
 </main>
 <script src="/static/documents.js"></script>
 </body>

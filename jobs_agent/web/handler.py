@@ -5,8 +5,8 @@ Two pages:
   /            job review queue — fetch, filter, shortlist/reject, and run
                the review-and-approve workflow below
   /documents   Profile page — candidate name, CV (uploaded as .docx or .pdf,
-               text extracted), and cover-letter template, stored once and
-               reused for every draft
+               text extracted), cover-letter template, and the scoring
+               profile, stored once and reused for every draft
 
 Review workflow: "Prepare application" drafts a letter tailored to that
 posting (see letters/) and sets it to "drafted". A human reads it, edits it,
@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from ..config import default_db_path
-from ..profile import DEFAULT_PROFILE
+from ..profile import load_profile
 from ..storage import DOC_CANDIDATE_NAME, open_store
 from . import api, pages
 
@@ -36,6 +36,7 @@ GET_ROUTES = {
     "/api/stats": api.get_stats,
     "/api/queue": api.get_queue,
     "/api/documents": api.get_documents,
+    "/api/profile": api.get_profile,
     "/api/cv/file": api.get_cv_file,
 }
 
@@ -47,6 +48,8 @@ POST_ROUTES = {
     "/api/letter": api.post_letter,
     "/api/cv": api.post_cv,
     "/api/documents": api.post_documents,
+    "/api/profile": api.post_profile,
+    "/api/profile/reset": api.post_profile_reset,
 }
 
 
@@ -99,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
             with open_store(self.db_path) as store:
                 name = store.get_document(DOC_CANDIDATE_NAME).strip()
                 if not name:
-                    name = DEFAULT_PROFILE.name
+                    name = load_profile(store).name
             self._send_html(pages.queue_page(name))
             return
 

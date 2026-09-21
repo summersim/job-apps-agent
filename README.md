@@ -42,14 +42,14 @@ which directory you run them from. Override the database with `--db`.
 - **Job Queue** (`/`) — fetch, filter by status/score/location (defaults to
   "Central London" — clear the box for anywhere), and move postings through
   the review workflow below.
-- **Profile** (`/documents`) — your name, your CV, and an example cover
-  letter.
+- **Profile** (`/documents`) — your name, your CV, an example cover letter,
+  and the scoring profile.
 
 Everything on the Profile page lives in the SQLite database: the CV as both
 the original file (`files` table, re-downloadable from the page) and its
-extracted text, and the example letter and your name as text (`documents`
-table). Re-uploading or re-saving overwrites in place; restarting the server
-keeps everything.
+extracted text, the example letter and your name as text, and the scoring
+profile as JSON (all in the `documents` table). Re-uploading or re-saving
+overwrites in place; restarting the server keeps everything.
 
 **Review workflow**, backed by the `applications.status` column:
 
@@ -71,7 +71,7 @@ human did so elsewhere, so it drops out of the queue.
 jobs_agent/
   config.py       environment, paths, search keywords
   models.py       Posting and its deduplication keys
-  profile.py      the scoring profile: what counts as a good match
+  profile.py      the scoring profile: dataclass, defaults, persistence
   scoring.py      deterministic relevance scoring
   pipeline.py     fetch -> score -> dedupe -> store, shared by CLI and web
   cli.py          argument parsing and console output only
@@ -97,8 +97,8 @@ Between them these two APIs cover most agency-posted London contract listings.
 LinkedIn stays a manual channel.
 
 **Deterministic scoring, not an LLM.** Every score carries its reasons, so when
-something irrelevant ranks high you can see which weight caused it and fix
-the weight. That is not true of a model call, and at ingestion volume
+something irrelevant ranks high you can see which weight caused it and fix it
+on the Profile page. That is not true of a model call, and at ingestion volume
 the model calls would cost more than they're worth. Save the model for the
 letters.
 
@@ -130,9 +130,12 @@ transition otherwise, not just the UI.
   reason.
 - Coverage excludes roles posted only on firm career pages or LinkedIn.
 - `title_blockers` includes `counsel`, which will also drop legitimate
-  "Legal Counsel Assistant" roles. Tighten it if that segment matters.
+  "Legal Counsel Assistant" roles. Edit it on the Profile page if that
+  segment matters.
 - Freshness scoring assumes the posted date is real. Agencies repost stale
   roles with fresh dates; the dedupe catches most, not all.
+- Editing the scoring profile affects the next fetch. Postings already in the
+  queue keep the score they were stored with.
 - The server binds to `127.0.0.1` and has no authentication — it is a local
   single-user tool, not something to expose.
 

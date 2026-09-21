@@ -1,5 +1,13 @@
 const el = (id) => document.getElementById(id);
 
+// Scoring-profile textareas, keyed by the field name the API expects.
+const PROFILE_FIELDS = {
+  target_titles: "target-titles",
+  domain_terms: "domain-terms",
+  title_blockers: "title-blockers",
+  experience_blockers: "experience-blockers",
+};
+
 function bytesToBase64(bytes) {
   let bin = "";
   const chunk = 0x8000;
@@ -30,14 +38,31 @@ function setMsg(id, text, isErr) {
   m.className = isErr ? "err" : "";
 }
 
+function fillProfile(profile) {
+  for (const [field, elementId] of Object.entries(PROFILE_FIELDS)) {
+    el(elementId).value = profile[field] || "";
+  }
+}
+
+function readProfile() {
+  const out = {};
+  for (const [field, elementId] of Object.entries(PROFILE_FIELDS)) {
+    out[field] = el(elementId).value;
+  }
+  return out;
+}
 
 async function load() {
-  const res = await fetch("/api/documents");
-  const data = await res.json();
+  const [docsRes, profileRes] = await Promise.all([
+    fetch("/api/documents"),
+    fetch("/api/profile"),
+  ]);
+  const data = await docsRes.json();
   el("name").value = data.candidate_name || "";
   el("template").value = data.cover_letter_template || "";
   el("cv-preview").value = data.cv || "";
   showCvName(data.cv_filename);
+  fillProfile(await profileRes.json());
 }
 
 el("cv-file").addEventListener("change", async () => {
@@ -64,6 +89,70 @@ el("cv-file").addEventListener("change", async () => {
     setMsg("doc-msg", data.error || "Could not read that file.", true);
   }
   el("cv-file").value = "";
+});
+
+el("btn-save").addEventListener("click", async () => {
+  const btn = el("btn-save");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidate_name: el("name").value,
+        cover_letter_template: el("template").value,
+      }),
+    });
+    if (res.ok) {
+      setMsg("doc-msg", "Saved.");
+    } else {
+      setMsg("doc-msg", "Could not save.", true);
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el("btn-save-profile").addEventListener("click", async () => {
+  const btn = el("btn-save-profile");
+  btn.disabled = true;
+  setMsg("profile-msg", "Saving…");
+  try {
+    const res = await fetch("/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(readProfile()),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      // The server echoes the reformatted profile, so what you see is
+      // exactly what was stored — including terms it normalised.
+      fillProfile(data.profile);
+      setMsg("profile-msg", "Saved.");
+    } else {
+      setMsg("profile-msg", data.error || "Could not save the scoring profile.", true);
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el("btn-reset-profile").addEventListener("click", async () => {
+  if (!confirm("Discard your scoring profile and restore the defaults?")) return;
+  const btn = el("btn-reset-profile");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/profile/reset", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      fillProfile(data.profile);
+      setMsg("profile-msg", "Restored the defaults.");
+    } else {
+      setMsg("profile-msg", data.error || "Could not reset.", true);
+    }
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 load();

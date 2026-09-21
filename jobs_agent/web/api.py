@@ -15,6 +15,16 @@ from typing import Any
 from ..extract import CvExtractError, extract_cv_text
 from ..letters import DraftError, draft_letter, redraft_letter
 from ..pipeline import fetch_and_store_sync
+from ..profile import (
+    DEFAULT_PROFILE,
+    ProfileError,
+    format_lines,
+    format_weights,
+    load_profile,
+    parse_lines,
+    parse_weights,
+    save_profile,
+)
 from ..sources import NoSourcesConfigured
 from ..storage import (
     DOC_CANDIDATE_NAME,
@@ -113,6 +123,10 @@ def get_cv_file(store: Store, req: Request) -> File | Json:
         content_type=_CV_CONTENT_TYPES.get(ext, "application/octet-stream"),
         filename=row["filename"],
     )
+
+
+def get_profile(store: Store, req: Request) -> Json:
+    return Json(_profile_as_text(load_profile(store)))
 
 
 # -- POST -----------------------------------------------------------------
@@ -247,3 +261,58 @@ def post_documents(store: Store, req: Request) -> Json:
         if doc_id in req.payload:
             store.set_document(doc_id, req.payload[doc_id])
     return Json({"ok": True})
+
+
+def post_profile(store: Store, req: Request) -> Json:
+    """Save the edited scoring profile.
+
+    Nothing is written unless all four sections parse, so a typo in the last
+    one can't leave a half-applied profile behind.
+    """
+    current = load_profile(store)
+    try:
+        updated = _profile_from_text(req.payload, base=current)
+    except ProfileError as e:
+        return error(str(e))
+    if not updated.target_titles:
+        return error("Target titles can't be empty — a posting matching none "
+                     "of them is dropped, so an empty list drops everything.")
+    save_profile(store, updated)
+    return Json({"ok": True, "profile": _profile_as_text(updated)})
+
+
+def post_profile_reset(store: Store, req: Request) -> Json:
+    save_profile(store, DEFAULT_PROFILE)
+    return Json({"ok": True, "profile": _profile_as_text(DEFAULT_PROFILE)})
+
+
+# -- profile text round-trip ----------------------------------------------
+
+def _profile_as_text(profile) -> dict[str, str]:
+    return {
+        "target_titles": format_weights(profile.target_titles),
+        "domain_terms": format_weights(profile.domain_terms),
+        "title_blockers": format_lines(profile.title_blockers),
+        "experience_blockers": format_lines(profile.experience_blockers),
+    }
+
+
+def _profile_from_text(payload: dict, *, base):
+    """A copy of ``base`` with whichever sections the payload supplies.
+
+    ``name`` and ``location`` are carried over — they aren't edited here.
+    """
+    from dataclasses import replace
+
+    changes: dict[str, Any] = {}
+    if "target_titles" in payload:
+        changes["target_titles"] = parse_weights(
+            payload["target_titles"], what="Target titles")
+    if "domain_terms" in payload:
+        changes["domain_terms"] = parse_weights(
+            payload["domain_terms"], what="Domain terms")
+    if "title_blockers" in payload:
+        changes["title_blockers"] = parse_lines(payload["title_blockers"])
+    if "experience_blockers" in payload:
+        changes["experience_blockers"] = parse_lines(payload["experience_blockers"])
+    return replace(base, **changes)

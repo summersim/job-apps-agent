@@ -19,6 +19,7 @@ DOC_CV = "cv"
 DOC_CV_FILENAME = "cv_filename"
 DOC_TEMPLATE = "cover_letter_template"
 DOC_CANDIDATE_NAME = "candidate_name"
+DOC_SCORING_PROFILE = "scoring_profile"
 
 
 class Store:

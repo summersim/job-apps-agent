@@ -28,9 +28,10 @@ CREATE TABLE IF NOT EXISTS applications (
     updated     TEXT NOT NULL
 );
 
--- Candidate materials, one row per document id: 'cv' (extracted text),
--- 'cv_filename', 'cover_letter_template' and 'candidate_name'. Small and
--- few, so no history — the UI overwrites in place.
+-- Candidate materials and settings, one row per document id: 'cv' (extracted
+-- text), 'cv_filename', 'cover_letter_template', 'candidate_name', and
+-- 'scoring_profile' (the JSON-encoded Profile). Small and few, so no history
+-- — the UI overwrites in place.
 CREATE TABLE IF NOT EXISTS documents (
     id      TEXT PRIMARY KEY,
     content TEXT NOT NULL DEFAULT '',

@@ -23,3 +23,16 @@ details.cv-preview summary { cursor: pointer; font-size: 11px; text-transform: u
   font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
 }
 .save-row { margin-top: 18px; display: flex; align-items: center; gap: 12px; }
+
+/* Scoring profile */
+.section-head {
+  margin: 40px 0 0; padding-top: 24px; border-top: 1px solid var(--border);
+}
+.section-head h2 { margin: 0 0 4px; font-size: 16px; letter-spacing: -0.01em; }
+textarea.weights {
+  font: 12.5px/1.6 ui-monospace, Menlo, Consolas, monospace;
+  background: var(--bg);
+}
+#profile-msg { font-size: 13px; color: var(--muted); }
+#profile-msg.err { color: var(--rejected); white-space: pre-wrap; }
+.save-row .spacer { margin-left: auto; }

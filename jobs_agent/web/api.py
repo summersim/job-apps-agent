@@ -1,0 +1,249 @@
+"""API endpoints.
+
+Each endpoint is a plain function of ``(store, request)`` returning a
+response object. Nothing here touches sockets or ``BaseHTTPRequestHandler``,
+so the approval gate and the validation rules can be tested directly —
+handler.py only routes and serialises.
+"""
+
+from __future__ import annotations
+
+import base64
+from dataclasses import dataclass, field
+from typing import Any
+
+from ..extract import CvExtractError, extract_cv_text
+from ..letters import DraftError, draft_letter, redraft_letter
+from ..pipeline import fetch_and_store_sync
+from ..sources import NoSourcesConfigured
+from ..storage import (
+    DOC_CANDIDATE_NAME,
+    DOC_CV,
+    DOC_CV_FILENAME,
+    DOC_TEMPLATE,
+    Store,
+)
+
+# Full application lifecycle. "approved" requires a non-empty letter;
+# "submitted" requires the posting to already be "approved" — enforced here,
+# not just hidden in the UI.
+UI_STATUSES = ("new", "shortlisted", "drafted", "approved", "submitted", "rejected")
+
+CV_EXTENSIONS = (".docx", ".pdf")
+
+#: Document ids the Profile page's "Save profile" button may write.
+EDITABLE_DOC_IDS = (DOC_TEMPLATE, DOC_CANDIDATE_NAME)
+
+_CV_CONTENT_TYPES = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@dataclass
+class Request:
+    """What an endpoint needs from the HTTP layer."""
+
+    query: dict[str, list[str]] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def param(self, name: str, default: str = "") -> str:
+        return self.query.get(name, [default])[0]
+
+    def int_param(self, name: str, default: int) -> int:
+        try:
+            return int(self.param(name, str(default)))
+        except ValueError:
+            return default
+
+
+@dataclass
+class Json:
+    body: Any
+    status: int = 200
+
+
+@dataclass
+class File:
+    data: bytes
+    content_type: str
+    filename: str
+
+
+def error(message: str, status: int = 400) -> Json:
+    return Json({"error": message}, status)
+
+
+def _row_to_dict(row) -> dict:
+    return {k: row[k] for k in row.keys()}
+
+
+# -- GET ------------------------------------------------------------------
+
+def get_stats(store: Store, req: Request) -> Json:
+    return Json(store.stats())
+
+
+def get_queue(store: Store, req: Request) -> Json:
+    rows = store.queue(
+        status=req.param("status", "new"),
+        min_score=req.int_param("min_score", 0),
+        limit=req.int_param("limit", 50),
+        location=req.param("location").strip() or None,
+    )
+    return Json([_row_to_dict(r) for r in rows])
+
+
+def get_documents(store: Store, req: Request) -> Json:
+    return Json({
+        "candidate_name": store.get_document(DOC_CANDIDATE_NAME),
+        "cv": store.get_document(DOC_CV),
+        "cv_filename": store.get_document(DOC_CV_FILENAME),
+        "cover_letter_template": store.get_document(DOC_TEMPLATE),
+    })
+
+
+def get_cv_file(store: Store, req: Request) -> File | Json:
+    row = store.get_file(DOC_CV)
+    if not row:
+        return error("no CV on file", 404)
+    ext = row["filename"].lower().rsplit(".", 1)[-1]
+    return File(
+        data=row["data"],
+        content_type=_CV_CONTENT_TYPES.get(ext, "application/octet-stream"),
+        filename=row["filename"],
+    )
+
+
+# -- POST -----------------------------------------------------------------
+
+def post_fetch(store: Store, req: Request) -> Json:
+    per_keyword = int(req.payload.get("per_keyword", 100))
+    try:
+        result = fetch_and_store_sync(store, per_keyword=per_keyword)
+    except NoSourcesConfigured as e:
+        return error(str(e))
+    return Json(result.as_dict())
+
+
+def post_status(store: Store, req: Request) -> Json:
+    key, status = req.payload.get("key"), req.payload.get("status")
+    if not key or status not in UI_STATUSES:
+        return error("bad key or status")
+
+    app_row = store.get_application(key)
+    if not app_row:
+        return error("unknown posting", 404)
+    if status == "approved" and not (app_row["letter"] or "").strip():
+        return error("Prepare the application (draft a letter) before approving.")
+    if status == "submitted" and app_row["status"] != "approved":
+        return error("Approve the application before marking it submitted.")
+
+    store.set_status(key, status)
+    return Json({"ok": True})
+
+
+def post_draft(store: Store, req: Request) -> Json:
+    key = req.payload.get("key")
+    if not key:
+        return error("missing key")
+
+    posting = store.get_posting(key)
+    if not posting:
+        return error("unknown posting", 404)
+
+    cv = store.get_document(DOC_CV)
+    template = store.get_document(DOC_TEMPLATE)
+    if not cv.strip() or not template.strip():
+        return error("Add your CV and an example cover letter on the "
+                     "Profile page first.")
+
+    try:
+        letter = draft_letter(
+            title=posting["title"], employer=posting["employer"],
+            location=posting["location"], description=posting["description"],
+            cv=cv, template=template,
+        )
+    except DraftError as e:
+        return error(str(e))
+
+    store.set_letter(key, letter)
+    store.set_status(key, "drafted")
+    return Json({"ok": True, "letter": letter})
+
+
+def post_redraft(store: Store, req: Request) -> Json:
+    key = req.payload.get("key")
+    feedback = (req.payload.get("feedback") or "").strip()
+    if not key or not feedback:
+        return error("missing key or feedback")
+
+    posting = store.get_posting(key)
+    app_row = store.get_application(key)
+    if not posting or not app_row:
+        return error("unknown posting", 404)
+
+    # The browser sends the textarea's current contents, so unsaved edits are
+    # what gets revised; fall back to the stored draft when it doesn't.
+    previous_letter = req.payload.get("letter")
+    if previous_letter is None:
+        previous_letter = app_row["letter"] or ""
+    if not previous_letter.strip():
+        return error("Prepare the application (draft a letter) before "
+                     "redrafting with feedback.")
+
+    cv = store.get_document(DOC_CV)
+    if not cv.strip():
+        return error("Add your CV on the Profile page first.")
+
+    try:
+        letter = redraft_letter(
+            title=posting["title"], employer=posting["employer"],
+            location=posting["location"], description=posting["description"],
+            cv=cv, previous_letter=previous_letter, feedback=feedback,
+        )
+    except DraftError as e:
+        return error(str(e))
+
+    store.set_letter(key, letter)
+    return Json({"ok": True, "letter": letter})
+
+
+def post_letter(store: Store, req: Request) -> Json:
+    key, letter = req.payload.get("key"), req.payload.get("letter")
+    if not key or letter is None:
+        return error("missing key or letter")
+    if not store.get_application(key):
+        return error("unknown posting", 404)
+    store.set_letter(key, letter)
+    return Json({"ok": True})
+
+
+def post_cv(store: Store, req: Request) -> Json:
+    filename = (req.payload.get("filename") or "cv").strip()
+    if not filename.lower().endswith(CV_EXTENSIONS):
+        return error("Upload a .docx or .pdf file.")
+    try:
+        blob = base64.b64decode(req.payload.get("data_b64") or "", validate=True)
+    except (ValueError, TypeError):
+        return error("could not decode the upload")
+    try:
+        text = extract_cv_text(filename, blob)
+    except CvExtractError as e:
+        return error(f"Could not read that file: {e}")
+    if not text.strip():
+        return error("No readable text found — if this is a scanned or "
+                     "image-only CV, upload a text-based version.")
+
+    store.set_file(DOC_CV, filename, blob)     # the original document
+    store.set_document(DOC_CV, text)           # cached extracted text
+    store.set_document(DOC_CV_FILENAME, filename)
+    return Json({"ok": True, "filename": filename,
+                 "chars": len(text), "text": text})
+
+
+def post_documents(store: Store, req: Request) -> Json:
+    for doc_id in EDITABLE_DOC_IDS:
+        if doc_id in req.payload:
+            store.set_document(doc_id, req.payload[doc_id])
+    return Json({"ok": True})

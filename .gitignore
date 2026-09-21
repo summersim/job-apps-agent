@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# Local database and other generated data
+data/
+*.db
+
 # Python
 __pycache__/
 *.py[cod]

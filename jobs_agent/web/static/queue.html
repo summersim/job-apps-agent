@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Legal &amp; Compliance Job Queue</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/queue.css">
+</head>
+<body>
+{nav}
+<header>
+  <h1>Legal &amp; Compliance Job Queue</h1>
+  <div class="sub">Ranked review queue for {candidate_name}. Each letter is AI-drafted from your CV and example letter, then read and approved by you — nothing here is submitted automatically.</div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="controls">
+  <div class="field">
+    <label for="f-status">Status</label>
+    <select id="f-status">
+      <option value="new">new</option>
+      <option value="shortlisted">shortlisted</option>
+      <option value="drafted">drafted</option>
+      <option value="approved">approved</option>
+      <option value="submitted">submitted</option>
+      <option value="rejected">rejected</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="f-limit">Limit</label>
+    <input id="f-limit" type="number" value="50" step="1" style="width:70px">
+  </div>
+  <div class="field">
+    <label for="f-location">Location</label>
+    <input id="f-location" type="text" value="Central London" placeholder="e.g. London" style="width:140px">
+  </div>
+  <button id="btn-refresh">Refresh queue</button>
+  <button id="btn-fetch" class="primary spacer-left">Fetch new listings</button>
+</div>
+
+<div id="status-msg"></div>
+
+<main id="results"><div class="empty">Loading…</div></main>
+
+<script src="/static/queue.js"></script>
+</body>
+</html>

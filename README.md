@@ -1,47 +1,55 @@
-# legal-apply-agent
+# jobs-agent
 
-Application pipeline for London legal and compliance roles. Ingestion core only
-at this stage — cover letters come next.
+Application pipeline for London legal and compliance roles: fetch, score,
+deduplicate, draft, and stage into a review queue.
 
-**Nothing here submits an application.** It fetches, deduplicates, scores, and
-stages roles into a review queue. A human approves and submits.
+**Nothing here submits an application.** A human approves and submits.
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
 
-export REED_API_KEY=...          # https://www.reed.co.uk/developers/jobseeker
-export ADZUNA_APP_ID=...         # https://developer.adzuna.com/
-export ADZUNA_APP_KEY=...
-export GEMINI_API_KEY=...        # only needed for drafting cover letters
-
-python -m legal_agent.cli fetch
-python -m legal_agent.cli queue --min-score 40
-python -m legal_agent.cli stats
-python -m legal_agent.cli serve  # web UI over all of the above
+cp .env.example .env    # then fill it in, or export the keys directly
 ```
 
-Both job-board API keys are free. Reed's is issued instantly; Adzuna's takes a
-few minutes.
+| Variable | Needed for | Where |
+|---|---|---|
+| `REED_API_KEY` | fetching | https://www.reed.co.uk/developers/jobseeker |
+| `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | fetching | https://developer.adzuna.com/ |
+| `GEMINI_API_KEY` | drafting cover letters | https://aistudio.google.com/apikey |
+| `JOBS_AGENT_GEMINI_MODEL` | optional model override | defaults to `gemini-3.6-flash` |
+
+Both job-board API keys are free — Reed's is issued instantly, Adzuna's takes
+a few minutes. Either board works on its own; a missing key skips that board
+with a warning rather than failing.
+
+```bash
+python -m jobs_agent fetch
+python -m jobs_agent queue --min-score 40
+python -m jobs_agent stats
+python -m jobs_agent serve       # web UI over all of the above
+```
+
+`.env` is read from the repository root, and the database defaults to
+`data/jobs.db` there too, so the commands agree with each other no matter
+which directory you run them from. Override the database with `--db`.
 
 ## Web UI
 
-`python -m legal_agent.cli serve` opens a local review UI with two pages:
+`python -m jobs_agent serve` opens a local review UI with two pages:
 
 - **Job Queue** (`/`) — fetch, filter by status/score/location (defaults to
   "Central London" — clear the box for anywhere), and move postings through
   the review workflow below.
-- **CV & Cover Letter** (`/documents`) — upload your CV as a `.docx` or `.pdf`
-  (text is extracted on upload; a scanned/image-only PDF won't work) and paste
-  an example cover letter you wrote yourself. The drafter reads the example to
-  match your voice and structure when it writes a fresh letter per application.
+- **Profile** (`/documents`) — your name, your CV, and an example cover
+  letter.
 
-  All of it lives in the SQLite database (`jobs.db` in the project root, or
-  `--db`): the CV as both the original file (`files` table, re-downloadable
-  from the page) and its extracted text, and the example letter as text
-  (`documents` table). Re-uploading or re-saving overwrites in place;
-  restarting the server keeps everything.
+Everything on the Profile page lives in the SQLite database: the CV as both
+the original file (`files` table, re-downloadable from the page) and its
+extracted text, and the example letter and your name as text (`documents`
+table). Re-uploading or re-saving overwrites in place; restarting the server
+keeps everything.
 
 **Review workflow**, backed by the `applications.status` column:
 
@@ -51,24 +59,48 @@ new / shortlisted --[Prepare application]--> drafted --[Approve]--> approved --[
 
 "Prepare application" sends the posting plus your CV and example letter to
 Gemini, which writes a complete cover letter tailored to that posting in your
-voice (see "Design decisions" below). The result lands in `drafted`, editable
-in place. A posting can only be marked `submitted` once it is `approved` —
-the server rejects the request otherwise. Nothing in this tool ever calls a
-job board's apply endpoint; `submitted` just records that a human did so
-elsewhere, so it drops out of the queue.
+voice. The result lands in `drafted`, editable in place, with a feedback box
+that redrafts it. A posting can only be marked `submitted` once it is
+`approved` — the server rejects the request otherwise. Nothing in this tool
+ever calls a job board's apply endpoint; `submitted` just records that a
+human did so elsewhere, so it drops out of the queue.
+
+## Layout
+
+```
+jobs_agent/
+  config.py       environment, paths, search keywords
+  models.py       Posting and its deduplication keys
+  profile.py      the scoring profile: what counts as a good match
+  scoring.py      deterministic relevance scoring
+  pipeline.py     fetch -> score -> dedupe -> store, shared by CLI and web
+  cli.py          argument parsing and console output only
+  sources/        one module per job board, over a shared HTTP base
+  storage/        schema.sql and the SQLite Store
+  extract/        .docx / .pdf -> plain text
+  letters/        drafting prompts, and the model call that runs them
+  web/            server, route table, API endpoints, and static/ assets
+tests/            run with: python -m pytest
+data/jobs.db      the database (gitignored)
+```
+
+Two rules keep this navigable: `cli.py` and `web/` both depend on
+`pipeline.py` and never on each other, and `web/api.py` endpoints are plain
+functions of `(store, request)` so they can be tested without a socket.
 
 ## Design decisions worth arguing with
 
 **APIs, not scraping.** Reed and Adzuna publish documented UK job APIs.
-Scraping LinkedIn or Indeed would breach their terms, risk Nicole's account,
+Scraping LinkedIn or Indeed would breach their terms, risk the account,
 break on every layout change, and force regex parsing of salary out of HTML.
 Between them these two APIs cover most agency-posted London contract listings.
 LinkedIn stays a manual channel.
 
 **Deterministic scoring, not an LLM.** Every score carries its reasons, so when
-something irrelevant ranks high you can see which weight caused it and fix it.
-That is not true of a model call, and at ingestion volume the model calls would
-cost more than they're worth. Save the model for the letters.
+something irrelevant ranks high you can see which weight caused it and fix
+the weight. That is not true of a model call, and at ingestion volume
+the model calls would cost more than they're worth. Save the model for the
+letters.
 
 **Aggressive deduplication.** The same contract role is routinely posted by
 four agencies under three titles. Identity is built from the normalised title,
@@ -78,34 +110,34 @@ catches reposts with lightly edited bodies.
 
 **Exclusions are hard, not soft.** Seniority markers in the title and
 experience requirements in the body drop a posting to score -1 and remove it.
-Better to miss a stretch role than to bury the queue in things she can't get.
+Better to miss a stretch role than to bury the queue in things you can't get.
 
-**Cover letters: full draft, human sign-off.** For each application the model
-writes the whole letter, tailored to the posting. It is given Nicole's CV as
-the only source of facts — the prompt forbids inventing anything beyond it —
-and an example letter she wrote herself as the reference for voice, tone, and
-structure. This is a real generation step, so every draft is read and edited
-in the queue before it can be `approved`; the letter is never sent on the
-model's say-so.
+**Cover letters: full draft, human sign-off.** The model writes the whole
+letter, tailored to the posting. It gets the CV as the only source of facts —
+the prompt forbids inventing anything beyond it — and an example letter you
+wrote yourself as the reference for voice, tone, and structure. Every draft is
+read and edited in the queue before it can be `approved`; the letter is never
+sent on the model's say-so.
 
 **Approval is a hard gate, enforced server-side.** A posting can reach
-`submitted` only by passing through `approved` first; the API rejects the
-transition otherwise, not just the UI. Submission itself still isn't
-automated — see "Nothing here submits an application" above.
+`submitted` only by passing through `approved`; the API rejects the
+transition otherwise, not just the UI.
 
 ## Known limitations
 
 - Reed's and Adzuna's field names have changed before. Verify against their
-  current docs on first run; the adapters are small and isolated for that reason.
+  current docs on first run; each adapter is a single small module for that
+  reason.
 - Coverage excludes roles posted only on firm career pages or LinkedIn.
 - `title_blockers` includes `counsel`, which will also drop legitimate
   "Legal Counsel Assistant" roles. Tighten it if that segment matters.
 - Freshness scoring assumes the posted date is real. Agencies repost stale
   roles with fresh dates; the dedupe catches most, not all.
+- The server binds to `127.0.0.1` and has no authentication — it is a local
+  single-user tool, not something to expose.
 
 ## Next
 
-Actual submission is still manual by design — see "Nothing here submits an
-application" above. A candidate next step is per-site submission helpers
-(prefilling a Reed/Adzuna/firm application form), each reviewed by a human
-before anything is sent.
+Actual submission is still manual by design. A candidate next step is
+per-site submission helpers (prefilling a Reed/Adzuna/firm application form),
+each reviewed by a human before anything is sent.

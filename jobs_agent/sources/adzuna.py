@@ -1,0 +1,66 @@
+"""Adzuna adapter. https://developer.adzuna.com/"""
+
+from __future__ import annotations
+
+import asyncio
+
+import httpx
+
+from ..models import Posting
+from .base import clean, get_with_retry, parse_date
+
+
+class AdzunaSource:
+    name = "adzuna"
+    BASE = "https://api.adzuna.com/v1/api/jobs/gb/search"
+    PAGE = 50
+
+    def __init__(self, app_id: str, app_key: str, location: str = "London",
+                 max_days_old: int = 21, max_concurrency: int = 2):
+        self.app_id = app_id
+        self.app_key = app_key
+        self.location = location
+        self.max_days_old = max_days_old
+        self._sem = asyncio.Semaphore(max_concurrency)
+
+    async def fetch(self, client: httpx.AsyncClient, keyword: str,
+                    max_results: int = 300) -> list[Posting]:
+        out: list[Posting] = []
+        page = 1
+        while len(out) < max_results:
+            params = {
+                "app_id": self.app_id,
+                "app_key": self.app_key,
+                "what": keyword,
+                "where": self.location,
+                "results_per_page": self.PAGE,
+                "max_days_old": self.max_days_old,
+                "content-type": "application/json",
+            }
+            async with self._sem:
+                r = await get_with_retry(client, f"{self.BASE}/{page}",
+                                         params=params, timeout=30)
+            results = r.json().get("results", [])
+            if not results:
+                break
+            out.extend(self._to_posting(j) for j in results)
+            page += 1
+            await asyncio.sleep(0.3)
+        return out[:max_results]
+
+    @staticmethod
+    def _to_posting(j: dict) -> Posting:
+        ct = (j.get("contract_type") or "").lower() or None
+        return Posting(
+            source="adzuna",
+            source_id=str(j.get("id")),
+            title=j.get("title", ""),
+            employer=(j.get("company") or {}).get("display_name", ""),
+            location=(j.get("location") or {}).get("display_name", ""),
+            description=clean(j.get("description")),
+            url=j.get("redirect_url", ""),
+            posted=parse_date(j.get("created"), "%Y-%m-%dT%H:%M:%S"),
+            salary_min=j.get("salary_min"),
+            salary_max=j.get("salary_max"),
+            contract_type=ct,
+        )

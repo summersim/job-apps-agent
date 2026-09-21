@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Profile</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/documents.css">
+</head>
+<body>
+{nav}
+<header>
+  <h1>Profile</h1>
+  <div class="sub">Stored once, reused for every drafted application. Changes here affect future drafts only — letters already drafted keep what they were drafted with until you redraft them.</div>
+</header>
+<main>
+  <label class="doc-label" for="name">Your name</label>
+  <div class="hint">Shown on the Job Queue page and used to personalize this workspace.</div>
+  <input id="name" type="text" placeholder="e.g. Jane Smith">
+
+  <label class="doc-label" for="cv-file">CV</label>
+  <div class="hint">Upload your CV as a <code>.docx</code> or <code>.pdf</code> file. The original file is stored in the database and its text is extracted for drafting; formatting and layout are dropped from the text.</div>
+  <div class="cv-row">
+    <input id="cv-file" type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+    <span id="cv-name" class="cv-name"></span>
+  </div>
+  <details class="cv-preview">
+    <summary>Extracted text</summary>
+    <textarea id="cv-preview" rows="14" readonly placeholder="No CV uploaded yet."></textarea>
+  </details>
+
+  <label class="doc-label" for="template">Example cover letter</label>
+  <div class="hint">Paste a cover letter you wrote yourself. It is <em>not</em> sent as-is — the drafter reads it to learn your voice, tone, and structure, then writes a fresh letter tailored to each job.</div>
+  <textarea id="template" rows="16" placeholder="Dear Hiring Manager,&#10;&#10;I am writing to apply for…&#10;&#10;Kind regards,&#10;Jane"></textarea>
+
+  <div class="save-row">
+    <button id="btn-save" class="primary">Save profile</button>
+    <span id="doc-msg"></span>
+  </div>
+
+</main>
+<script src="/static/documents.js"></script>
+</body>
+</html>

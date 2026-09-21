@@ -9,6 +9,7 @@ data/
 
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.so
 .Python

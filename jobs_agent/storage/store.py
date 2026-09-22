@@ -92,7 +92,7 @@ class Store:
 
     def queue(self, min_score: int = 0, limit: int = 50,
               status: str = "new", location: str | None = None) -> Iterator[sqlite3.Row]:
-        sql = """SELECT p.*, a.status, a.letter, a.notes FROM postings p
+        sql = """SELECT p.*, a.status, a.letter, a.notes, a.updated FROM postings p
                  JOIN applications a ON a.posting_key = p.key
                  WHERE a.status = ? AND p.score >= ?"""
         params: list = [status, min_score]

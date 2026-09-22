@@ -4,8 +4,15 @@ from jobs_agent.web import pages
 
 
 def test_nav_marks_the_active_page():
-    assert 'href="/" class="active"' in pages.nav("queue")
-    assert 'href="/documents" class="active"' in pages.nav("documents")
+    assert 'href="/" aria-current="page"' in pages.nav("queue")
+    assert 'href="/documents" aria-current="page"' in pages.nav("documents")
+
+
+def test_nav_shows_and_escapes_the_candidate_slug():
+    assert 'class="nav-who"' not in pages.nav("queue")
+    marked = pages.nav("queue", '<b>Jane</b>')
+    assert "&lt;b&gt;Jane&lt;/b&gt;" in marked
+    assert "<b>Jane</b>" not in marked
 
 
 def test_queue_page_escapes_the_candidate_name():
@@ -21,7 +28,8 @@ def test_pages_have_no_placeholders_left():
 
 
 def test_static_assets_resolve():
-    for name in ("base.css", "queue.js", "documents.js", "queue.css"):
+    for name in ("ds-styles.css", "base.css", "queue.js", "documents.js",
+                 "queue.css", "documents.css"):
         asset = pages.static_asset(name)
         assert asset is not None, name
         assert asset[0]

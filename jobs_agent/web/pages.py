@@ -21,18 +21,26 @@ CONTENT_TYPES = {
 
 #: Site navigation, as (path, label, page key).
 NAV_ITEMS = (
-    ("/", "Job Queue", "queue"),
+    ("/", "Queue", "queue"),
     ("/documents", "Profile", "documents"),
 )
 
 
-def nav(active: str) -> str:
+def nav(active: str, who: str = "") -> str:
+    """The top bar. ``who`` is the candidate's name, shown as a trailing slug
+    on pages that are about their queue.
+
+    The active link is marked with ``aria-current`` rather than a class: the
+    design system styles that attribute directly, and it is what a screen
+    reader announces.
+    """
     links = []
     for path, label, key in NAV_ITEMS:
-        cls = ' class="active"' if key == active else ""
-        links.append(f'<a href="{path}"{cls}>{label}</a>')
-    return ('<nav class="topnav"><span class="brand">Jobs Agent</span>'
-            + "".join(links) + "</nav>")
+        current = ' aria-current="page"' if key == active else ""
+        links.append(f'<a href="{path}"{current}>{label}</a>')
+    slug = f'<span class="nav-who">{escape(who)}</span>' if who else ""
+    return ('<nav class="nav"><span class="nav-brand">Jobs Agent</span>'
+            + "".join(links) + slug + "</nav>")
 
 
 def render(name: str, **fields: str) -> str:
@@ -48,8 +56,7 @@ def render(name: str, **fields: str) -> str:
 
 
 def queue_page(candidate_name: str) -> str:
-    return render("queue.html", nav=nav("queue"),
-                  candidate_name=escape(candidate_name))
+    return render("queue.html", nav=nav("queue", candidate_name))
 
 
 def documents_page() -> str:

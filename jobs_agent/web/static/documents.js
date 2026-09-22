@@ -1,21 +1,38 @@
 const el = (id) => document.getElementById(id);
 
-// Scoring-profile textareas, keyed by the field name the API expects.
-const PROFILE_FIELDS = {
-  target_titles: "target-titles",
-  domain_terms: "domain-terms",
-  title_blockers: "title-blockers",
-  experience_blockers: "experience-blockers",
+/* The two tabs, each with the heading and standfirst that belong to it. */
+const TABS = {
+  identity: {
+    title: "Profile",
+    blurb: "Stored once, reused for every draft. Changes affect future drafts only — "
+         + "letters already written keep what they were drafted with.",
+  },
+  scoring: {
+    title: "Scoring profile",
+    blurb: "What counts as a good match. Applied on the next fetch — postings already "
+         + "in the queue keep the score they were stored with.",
+  },
 };
 
-function bytesToBase64(bytes) {
-  let bin = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  }
-  return btoa(bin);
-}
+/* The four scoring lists. "weights" fields carry a number per term and
+ * round-trip as `term = weight`; "lines" fields are bare terms, one per line,
+ * where a trailing space is meaningful and must survive editing.
+ */
+const FIELDS = {
+  target_titles: { kind: "weights", add: "Add a title" },
+  domain_terms: { kind: "weights", add: "Add a term" },
+  title_blockers: { kind: "lines", add: "Add a blocker" },
+  experience_blockers: { kind: "lines", add: "Add a blocker" },
+};
+//: Chips shown before the list folds behind a "+ N more".
+const VISIBLE_CHIPS = 14;
+
+const CV_HINT = 'A <code>.docx</code> or <code>.pdf</code>. The original file is kept; '
+              + 'its text is extracted for drafting, without the layout.';
+
+//: field -> { items: [{term, weight}], expanded: bool }
+const state = {};
+let tab = "identity";
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -23,33 +40,203 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function showCvName(filename) {
-  const span = el("cv-name");
-  if (filename) {
-    span.innerHTML = 'Stored: <a href="/api/cv/file">' + escapeHtml(filename) + "</a>";
-  } else {
-    span.textContent = "No CV uploaded yet.";
-  }
-}
-
 function setMsg(id, text, isErr) {
   const m = el(id);
   m.textContent = text || "";
-  m.className = isErr ? "err" : "";
+  m.className = "saved-note" + (isErr ? " err" : "");
+}
+
+/* — tabs — */
+
+function showTab(name) {
+  tab = TABS[name] ? name : "identity";
+  el("profile-title").textContent = TABS[tab].title;
+  el("profile-blurb").textContent = TABS[tab].blurb;
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  });
+  el("panel-identity").hidden = tab !== "identity";
+  el("panel-scoring").hidden = tab !== "scoring";
+}
+
+document.querySelectorAll(".tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    showTab(btn.dataset.tab);
+    history.replaceState(null, "", "#" + tab);
+  });
+});
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+
+/* — the scoring lists: text on the wire, chips on the screen —
+ * The model below is the single source of truth. The chips and the "Edit as
+ * text" box are two views of it, and both write straight back into it.
+ */
+
+function parseField(field, text) {
+  const { kind } = FIELDS[field];
+  const items = [];
+  for (const raw of String(text || "").split("\n")) {
+    if (kind === "lines") {
+      // Only the line ending is stripped: `lead ` and `lead` are different
+      // blockers, and the trailing space is the whole point of the former.
+      const term = raw.replace(/\r$/, "").toLowerCase();
+      if (term.trim() && !term.trimStart().startsWith("#")) items.push({ term });
+      continue;
+    }
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const at = line.lastIndexOf("=");
+    const term = (at === -1 ? line : line.slice(0, at)).trim().toLowerCase();
+    const weight = parseInt(at === -1 ? "0" : line.slice(at + 1).trim(), 10);
+    if (term) items.push({ term, weight: Number.isFinite(weight) ? weight : 0 });
+  }
+  return items;
+}
+
+function formatField(field) {
+  const { kind } = FIELDS[field];
+  return state[field].items
+    .filter((i) => i.term.trim())
+    .map((i) => (kind === "weights" ? `${i.term} = ${i.weight}` : i.term))
+    .join("\n");
+}
+
+function chip(field, item, index) {
+  const { kind } = FIELDS[field];
+  const term = escapeHtml(item.term);
+  const label = escapeHtml(item.term.trim() || "this term");
+  // A trailing space is invisible, so it gets a mark of its own rather than
+  // being silently dropped the first time someone edits the chip.
+  const ws = item.term !== item.term.trimEnd()
+    ? `<span class="chip-ws" title="ends with a space">␣</span>` : "";
+  const weight = kind === "weights"
+    ? `<input class="chip-weight" type="number" step="1" data-index="${index}"
+              value="${item.weight}" aria-label="Weight for ${label}">` : "";
+  return `
+    <span class="chip ${kind === "weights" ? "chip-weighted" : "chip-blocker"}">
+      <input class="chip-term" data-index="${index}" value="${term}"
+             style="width:${Math.max(item.term.length, 3)}ch"
+             aria-label="Term" spellcheck="false">${ws}${weight}
+      <button class="chip-x" data-remove="${index}" title="Remove"
+              aria-label="Remove ${label}">×</button>
+    </span>`;
+}
+
+function renderField(field) {
+  const block = document.querySelector(`.block[data-field="${field}"]`);
+  const box = block.querySelector("[data-chips]");
+  const { items, expanded } = state[field];
+
+  if (!items.length) {
+    box.innerHTML = `<span class="chips-empty">Nothing here yet.</span>`;
+  } else {
+    const shown = expanded ? items : items.slice(0, VISIBLE_CHIPS);
+    const hidden = items.length - shown.length;
+    box.innerHTML = shown.map((item, i) => chip(field, item, i)).join("")
+      + (hidden ? `<button class="chip-more" data-expand>+ ${hidden} more</button>` : "");
+  }
+  box.insertAdjacentHTML("beforeend",
+    `<button class="btn btn-ghost" data-add>${FIELDS[field].add}</button>`);
+
+  // Keep the text view honest if it happens to be open.
+  const details = block.querySelector(".as-text");
+  if (details.open) block.querySelector("[data-text]").value = formatField(field);
+}
+
+function renderScoring() {
+  for (const field of Object.keys(FIELDS)) renderField(field);
 }
 
 function fillProfile(profile) {
-  for (const [field, elementId] of Object.entries(PROFILE_FIELDS)) {
-    el(elementId).value = profile[field] || "";
+  for (const field of Object.keys(FIELDS)) {
+    state[field] = {
+      items: parseField(field, profile[field]),
+      expanded: state[field] ? state[field].expanded : false,
+    };
   }
+  renderScoring();
 }
 
 function readProfile() {
   const out = {};
-  for (const [field, elementId] of Object.entries(PROFILE_FIELDS)) {
-    out[field] = el(elementId).value;
-  }
+  for (const field of Object.keys(FIELDS)) out[field] = formatField(field);
   return out;
+}
+
+/* One delegated listener per block, wired once, covering both views. */
+for (const field of Object.keys(FIELDS)) {
+  const block = document.querySelector(`.block[data-field="${field}"]`);
+
+  block.querySelector("[data-chips]").addEventListener("click", (ev) => {
+    const remove = ev.target.closest("[data-remove]");
+    if (remove) {
+      state[field].items.splice(Number(remove.dataset.remove), 1);
+      renderField(field);
+      return;
+    }
+    if (ev.target.closest("[data-expand]")) {
+      state[field].expanded = true;
+      renderField(field);
+      return;
+    }
+    if (ev.target.closest("[data-add]")) {
+      state[field].items.push(
+        FIELDS[field].kind === "weights" ? { term: "", weight: 10 } : { term: "" });
+      state[field].expanded = true;
+      renderField(field);
+      // The new chip is the last term input; put the caret in it.
+      const inputs = block.querySelectorAll(".chip-term");
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    }
+  });
+
+  // Live edits write into the model without re-rendering, so the caret stays
+  // where it is. Only structural changes re-render.
+  block.querySelector("[data-chips]").addEventListener("input", (ev) => {
+    const target = ev.target;
+    const index = Number(target.dataset.index);
+    const item = state[field].items[index];
+    if (!item) return;
+    if (target.classList.contains("chip-term")) {
+      item.term = target.value.toLowerCase();
+      target.style.width = Math.max(item.term.length, 3) + "ch";
+    } else if (target.classList.contains("chip-weight")) {
+      const n = parseInt(target.value, 10);
+      item.weight = Number.isFinite(n) ? n : 0;
+    }
+  });
+
+  const details = block.querySelector(".as-text");
+  const text = block.querySelector("[data-text]");
+  details.addEventListener("toggle", () => {
+    if (details.open) text.value = formatField(field);
+    else renderField(field);
+  });
+  text.addEventListener("input", () => {
+    state[field].items = parseField(field, text.value);
+  });
+  text.addEventListener("blur", () => renderField(field));
+}
+
+/* — identity & documents — */
+
+function showCv(filename, chars) {
+  const pick = el("btn-cv-pick");
+  if (filename) {
+    const ext = filename.toLowerCase().split(".").pop();
+    el("cv-badge").textContent = ext === "pdf" || ext === "docx" ? ext.toUpperCase() : "CV";
+    el("cv-name").textContent = filename;
+    el("cv-meta").textContent =
+      `${Number(chars || 0).toLocaleString()} characters extracted · original file kept`;
+    el("cv-download").hidden = false;
+    pick.textContent = "Replace";
+  } else {
+    el("cv-badge").textContent = "CV";
+    el("cv-name").textContent = "No CV uploaded yet";
+    el("cv-meta").innerHTML = CV_HINT;
+    el("cv-download").hidden = true;
+    pick.textContent = "Upload";
+  }
 }
 
 async function load() {
@@ -61,19 +248,31 @@ async function load() {
   el("name").value = data.candidate_name || "";
   el("template").value = data.cover_letter_template || "";
   el("cv-preview").value = data.cv || "";
-  showCvName(data.cv_filename);
+  showCv(data.cv_filename, (data.cv || "").length);
   fillProfile(await profileRes.json());
 }
+
+function bytesToBase64(bytes) {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+el("btn-cv-pick").addEventListener("click", () => el("cv-file").click());
 
 el("cv-file").addEventListener("change", async () => {
   const file = el("cv-file").files[0];
   if (!file) return;
   const lower = file.name.toLowerCase();
   if (!(lower.endsWith(".docx") || lower.endsWith(".pdf"))) {
-    setMsg("doc-msg", "Please choose a .docx or .pdf file.", true);
+    setMsg("cv-msg", "Please choose a .docx or .pdf file.", true);
+    el("cv-file").value = "";
     return;
   }
-  setMsg("doc-msg", "Reading " + file.name + "…");
+  setMsg("cv-msg", "Reading " + file.name + "…");
   const bytes = new Uint8Array(await file.arrayBuffer());
   const res = await fetch("/api/cv", {
     method: "POST",
@@ -82,11 +281,11 @@ el("cv-file").addEventListener("change", async () => {
   });
   const data = await res.json().catch(() => ({}));
   if (res.ok) {
-    setMsg("doc-msg", "Uploaded " + data.filename + " — " + data.chars + " characters extracted, original file stored.");
-    showCvName(data.filename);
+    setMsg("cv-msg", `Uploaded ${data.filename}.`);
+    showCv(data.filename, data.chars);
     el("cv-preview").value = data.text;
   } else {
-    setMsg("doc-msg", data.error || "Could not read that file.", true);
+    setMsg("cv-msg", data.error || "Could not read that file.", true);
   }
   el("cv-file").value = "";
 });
@@ -103,11 +302,7 @@ el("btn-save").addEventListener("click", async () => {
         cover_letter_template: el("template").value,
       }),
     });
-    if (res.ok) {
-      setMsg("doc-msg", "Saved.");
-    } else {
-      setMsg("doc-msg", "Could not save.", true);
-    }
+    setMsg("doc-msg", res.ok ? "Saved." : "Could not save.", !res.ok);
   } finally {
     btn.disabled = false;
   }
@@ -126,7 +321,7 @@ el("btn-save-profile").addEventListener("click", async () => {
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
       // The server echoes the reformatted profile, so what you see is
-      // exactly what was stored — including terms it normalised.
+      // exactly what was stored — including terms it normalised or merged.
       fillProfile(data.profile);
       setMsg("profile-msg", "Saved.");
     } else {
@@ -155,4 +350,5 @@ el("btn-reset-profile").addEventListener("click", async () => {
   }
 });
 
+showTab(location.hash.slice(1));
 load();

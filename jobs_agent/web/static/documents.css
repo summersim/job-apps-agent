@@ -1,38 +1,177 @@
-main { padding: 20px 28px 60px; max-width: 780px; margin: 0 auto; }
-.doc-label { display: block; font-size: 12px; text-transform: uppercase;
-  letter-spacing: .04em; color: var(--muted); margin: 22px 0 6px; }
-.hint { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
-.hint code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
-textarea {
-  width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 12px;
-  font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, sans-serif;
-  resize: vertical; background: var(--panel); color: var(--text);
-}
-input#name {
-  width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
-  font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, sans-serif;
-  background: var(--panel); color: var(--text);
-}
-.cv-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.cv-name { font-size: 12.5px; color: var(--muted); }
-details.cv-preview { margin-top: 10px; }
-details.cv-preview summary { cursor: pointer; font-size: 11px; text-transform: uppercase;
-  letter-spacing: .04em; color: var(--muted); margin-bottom: 6px; }
-#cv-preview {
-  background: var(--bg); color: var(--muted);
-  font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
-}
-.save-row { margin-top: 18px; display: flex; align-items: center; gap: 12px; }
+/* Profile — two tabbed panels: who you are plus the documents the drafter
+ * reads, and the scoring profile that decides what reaches the queue.
+ */
 
-/* Scoring profile */
-.section-head {
-  margin: 40px 0 0; padding-top: 24px; border-top: 1px solid var(--border);
+.profile {
+  display: flex; flex-direction: column; gap: var(--space-8);
+  max-width: 940px;
 }
-.section-head h2 { margin: 0 0 4px; font-size: 16px; letter-spacing: -0.01em; }
-textarea.weights {
+.panel { display: flex; flex-direction: column; gap: var(--space-8); }
+/* `display: flex` above would otherwise beat the hidden attribute's
+   UA `display: none`, and both tabs would render at once. */
+.panel[hidden] { display: none; }
+
+/* — tabs — */
+.tabs { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }
+.tab {
+  font: inherit; font-size: 13px; cursor: pointer;
+  padding: 7px 14px; border-radius: 999px;
+  color: var(--color-text); background: none;
+  border: 1px solid var(--color-divider);
+}
+.tab:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.tab[aria-selected="true"] {
+  background: var(--color-accent-2-600); color: var(--color-bg);
+  border-color: transparent; font-weight: 600;
+}
+
+/* — a labelled section — */
+.block { display: flex; flex-direction: column; gap: var(--space-3); max-width: 700px; }
+.block.narrow { max-width: 520px; }
+.block h4 { margin: 0; }
+/* Headings and hints sit tight to each other, then the control gets air. */
+.block h4 + .hint, .block .block-label + .hint { margin-top: -8px; }
+.block-label {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+.hint {
+  margin: 0; font-size: 13.5px; line-height: 1.55;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+}
+.hint code {
+  background: var(--color-surface); border-radius: 5px;
+  padding: 1px 6px; font-size: 12.5px;
+}
+.save-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.save-row .saved-note { margin-left: var(--space-2); }
+
+/* — text boxes —
+ * The letter reads as prose on the card surface; extracted text and the
+ * raw term lists read as data, on the palest neutral.
+ */
+.prose-box, .mono-box {
+  width: 100%; border: 1px solid transparent; border-radius: 24px;
+  padding: 22px 24px; resize: vertical; color: var(--color-text);
+  caret-color: var(--color-accent);
+}
+.prose-box {
+  background: var(--color-surface);
+  font: 400 14px/1.6 var(--font-body);
+}
+.mono-box {
+  background: var(--color-neutral-100);
   font: 12.5px/1.6 ui-monospace, Menlo, Consolas, monospace;
-  background: var(--bg);
+  color: color-mix(in srgb, var(--color-text) 75%, transparent);
 }
-#profile-msg { font-size: 13px; color: var(--muted); }
-#profile-msg.err { color: var(--rejected); white-space: pre-wrap; }
-.save-row .spacer { margin-left: auto; }
+.prose-box:hover, .mono-box:hover { border-color: var(--color-divider); }
+.prose-box:focus-visible, .mono-box:focus-visible {
+  border-color: var(--color-accent); outline: none;
+}
+
+/* — the CV on file — */
+.cv-card {
+  display: flex; gap: var(--space-6); align-items: center;
+  background: var(--color-surface); border-radius: 32px;
+  padding: 22px 26px; max-width: 700px;
+}
+.cv-badge {
+  flex: none; width: 64px; height: 64px; border-radius: 50%;
+  background: var(--color-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+.cv-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cv-file { font-size: 15px; font-weight: 600; }
+.cv-meta {
+  font-size: 12.5px; line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.cv-meta code { background: var(--color-bg); border-radius: 5px; padding: 1px 5px; }
+.cv-actions { display: flex; gap: var(--space-2); flex: none; }
+
+/* — scoring terms as chips — */
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 999px; font-size: 13px; padding: 5px 6px 5px 12px;
+}
+.chip-weighted { background: var(--color-surface); color: var(--color-text); }
+.chip-blocker {
+  background: var(--color-neutral-100); color: var(--color-neutral-700);
+  padding: 4px 6px 4px 12px;
+}
+.chip-blocker .chip-term { text-decoration: line-through; }
+/* Terms are edited in place, so the input is sized to its own text and
+   carries no chrome until you touch it. */
+.chip-term {
+  font: inherit; font-size: 13px; color: inherit;
+  background: transparent; border: 0; padding: 0;
+  min-width: 3ch;
+}
+.chip-term:focus-visible {
+  outline: 1px solid var(--color-accent); outline-offset: 3px; border-radius: 3px;
+}
+/* The inline width the script sets counts characters, and `ch` is the width of
+   a "0" — too generous for lowercase proportional text, so chips come out
+   padded. Where the browser can size the field to its own content, let it,
+   and override the inline fallback to do so. */
+@supports (field-sizing: content) {
+  .chip-term { field-sizing: content; width: auto !important; }
+}
+.chip-weight {
+  font: inherit; font-size: 13px; font-weight: 700; text-align: center;
+  width: 4.5ch; padding: 1px 4px; border: 0; border-radius: 999px;
+  background: var(--color-bg); color: inherit;
+  -moz-appearance: textfield;
+}
+.chip-weight::-webkit-outer-spin-button,
+.chip-weight::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.chip-weight:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
+.chip-ws {
+  font-size: 11px; opacity: 0.55; cursor: help;
+  border-radius: 3px; padding: 0 2px;
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+.chip-x {
+  flex: none; width: 20px; height: 20px; padding: 0; border: 0;
+  border-radius: 50%; cursor: pointer; font: inherit; font-size: 14px;
+  line-height: 1; background: transparent;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+.chip-x:hover {
+  background: color-mix(in srgb, var(--color-text) 12%, transparent);
+  color: var(--color-text);
+}
+.chip-more {
+  font-size: 13px; padding: 6px 16px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; background: none;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 30%, transparent);
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.chip-more:hover { color: var(--color-text); border-style: solid; }
+.chips-empty {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+/* — the raw-text escape hatch — */
+.as-text > summary {
+  font-size: 12px; cursor: pointer; width: fit-content;
+  color: var(--color-accent); list-style: none;
+}
+.as-text > summary::-webkit-details-marker { display: none; }
+.as-text > summary::before { content: "▸ "; }
+.as-text[open] > summary::before { content: "▾ "; }
+.as-text[open] { display: flex; flex-direction: column; gap: var(--space-2); }
+.as-text .hint { font-size: 12.5px; }
+
+.blocker-columns { display: flex; gap: var(--space-8); flex-wrap: wrap; }
+.blocker-columns .block { flex: 1 1 300px; max-width: none; }
+
+@media (max-width: 760px) {
+  .page { padding: 8px 20px 44px; }
+  .cv-card { flex-wrap: wrap; gap: var(--space-4); border-radius: 28px; }
+  .cv-actions { width: 100%; }
+}

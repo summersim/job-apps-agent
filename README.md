@@ -15,6 +15,7 @@ cp .env.example .env    # then fill it in, or export the keys directly
 
 | Variable | Needed for | Where |
 |---|---|---|
+| `DATABASE_URL` | everything | Supabase project -> Settings -> Database -> Connection string |
 | `REED_API_KEY` | fetching | https://www.reed.co.uk/developers/jobseeker |
 | `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | fetching | https://developer.adzuna.com/ |
 | `GEMINI_API_KEY` | drafting cover letters | https://aistudio.google.com/apikey |
@@ -31,9 +32,10 @@ python -m jobs_agent stats
 python -m jobs_agent serve       # web UI over all of the above
 ```
 
-`.env` is read from the repository root, and the database defaults to
-`data/jobs.db` there too, so the commands agree with each other no matter
-which directory you run them from. Override the database with `--db`.
+`.env` is read from the repository root, so the commands agree with each
+other no matter which directory you run them from. The database is a
+Postgres instance (Supabase), read from `DATABASE_URL`; override per-command
+with `--db`.
 
 ## Web UI
 
@@ -45,7 +47,7 @@ which directory you run them from. Override the database with `--db`.
 - **Profile** (`/documents`) — your name, your CV, an example cover letter,
   and the scoring profile.
 
-Everything on the Profile page lives in the SQLite database: the CV as both
+Everything on the Profile page lives in the Postgres database: the CV as both
 the original file (`files` table, re-downloadable from the page) and its
 extracted text, the example letter and your name as text, and the scoring
 profile as JSON (all in the `documents` table). Re-uploading or re-saving
@@ -76,12 +78,11 @@ jobs_agent/
   pipeline.py     fetch -> score -> dedupe -> store, shared by CLI and web
   cli.py          argument parsing and console output only
   sources/        one module per job board, over a shared HTTP base
-  storage/        schema.sql and the SQLite Store
+  storage/        schema.sql and the Postgres Store
   extract/        .docx / .pdf -> plain text
   letters/        drafting prompts, and the model call that runs them
   web/            server, route table, API endpoints, and static/ assets
 tests/            run with: python -m pytest
-data/jobs.db      the database (gitignored)
 ```
 
 Two rules keep this navigable: `cli.py` and `web/` both depend on

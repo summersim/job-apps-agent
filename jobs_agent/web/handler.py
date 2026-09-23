@@ -25,7 +25,6 @@ import json
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-from ..config import default_db_path
 from ..profile import load_profile
 from ..storage import DOC_CANDIDATE_NAME, open_store
 from . import api, pages
@@ -54,7 +53,9 @@ POST_ROUTES = {
 
 
 class Handler(BaseHTTPRequestHandler):
-    db_path = default_db_path()
+    #: Postgres connection string override; None uses DATABASE_URL from the
+    #: environment, resolved lazily by Store on each request.
+    db: str | None = None
 
     def log_message(self, fmt, *args) -> None:  # quiet the default access log
         pass
@@ -99,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == "/":
-            with open_store(self.db_path) as store:
+            with open_store(self.db) as store:
                 name = store.get_document(DOC_CANDIDATE_NAME).strip()
                 if not name:
                     name = load_profile(store).name
@@ -124,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
             self._not_found()
             return
         request = api.Request(query=parse_qs(parsed.query))
-        with open_store(self.db_path) as store:
+        with open_store(self.db) as store:
             self._send_result(endpoint(store, request))
 
     def do_POST(self) -> None:  # noqa: N802
@@ -135,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         request = api.Request(payload=self._read_json())
-        with open_store(self.db_path) as store:
+        with open_store(self.db) as store:
             self._send_result(endpoint(store, request))
 
     def _read_json(self) -> dict:

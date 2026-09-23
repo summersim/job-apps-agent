@@ -1,14 +1,17 @@
-"""SQLite store. Deduplicates across sources and across runs."""
+"""Postgres store. Deduplicates across sources and across runs."""
 
 from __future__ import annotations
 
-import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from ..config import default_db_path
+import psycopg
+from psycopg import sql
+from psycopg.rows import DictRow, dict_row
+
+from ..config import database_url
 from ..models import Posting
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
@@ -23,12 +26,22 @@ DOC_SCORING_PROFILE = "scoring_profile"
 
 
 class Store:
-    def __init__(self, path: str | Path | None = None):
-        path = Path(path or default_db_path())
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(path))
-        self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA_PATH.read_text())
+    def __init__(self, dsn: str | None = None, schema: str | None = None):
+        """Connect to Postgres. ``schema`` isolates the tables under their
+        own schema (rather than ``public``) instead of a separate database —
+        used by tests to run in isolation against the same Supabase instance.
+        """
+        self.conn = psycopg.connect(dsn or database_url(), row_factory=dict_row)
+        with self.conn.cursor() as cur:
+            if schema:
+                cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
+                            .format(sql.Identifier(schema)))
+                cur.execute(sql.SQL("SET search_path TO {}")
+                            .format(sql.Identifier(schema)))
+            for statement in SCHEMA_PATH.read_text().split(";"):
+                statement = statement.strip()
+                if statement:
+                    cur.execute(statement)
         self.conn.commit()
 
     def close(self) -> None:
@@ -54,12 +67,12 @@ class Store:
         cur = self.conn.cursor()
 
         for p in postings:
-            if cur.execute("SELECT 1 FROM postings WHERE key=?", (p.key,)).fetchone():
+            if cur.execute("SELECT 1 FROM postings WHERE key=%s", (p.key,)).fetchone():
                 dup += 1
                 continue
 
             soft_hits = cur.execute(
-                "SELECT description FROM postings WHERE soft_key=?", (p.soft_key,)
+                "SELECT description FROM postings WHERE soft_key=%s", (p.soft_key,)
             ).fetchall()
             if any(_overlap(p.description, row["description"]) > 0.75 for row in soft_hits):
                 dup += 1
@@ -70,7 +83,7 @@ class Store:
                    (key, soft_key, source, source_id, title, employer, location,
                     description, url, posted, salary_min, salary_max,
                     contract_type, via_agency, score, score_reasons, first_seen)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     p.key, p.soft_key, p.source, p.source_id, p.title, p.employer,
                     p.location, p.description, p.url,
@@ -81,8 +94,8 @@ class Store:
                 ),
             )
             cur.execute(
-                "INSERT OR IGNORE INTO applications (posting_key, status, updated) "
-                "VALUES (?, 'new', ?)",
+                "INSERT INTO applications (posting_key, status, updated) "
+                "VALUES (%s, 'new', %s) ON CONFLICT (posting_key) DO NOTHING",
                 (p.key, now),
             )
             new += 1
@@ -91,21 +104,21 @@ class Store:
         return new, dup
 
     def queue(self, min_score: int = 0, limit: int = 50,
-              status: str = "new", location: str | None = None) -> Iterator[sqlite3.Row]:
-        sql = """SELECT p.*, a.status, a.letter, a.notes, a.updated FROM postings p
+              status: str = "new", location: str | None = None) -> Iterator[DictRow]:
+        query = """SELECT p.*, a.status, a.letter, a.notes, a.updated FROM postings p
                  JOIN applications a ON a.posting_key = p.key
-                 WHERE a.status = ? AND p.score >= ?"""
+                 WHERE a.status = %s AND p.score >= %s"""
         params: list = [status, min_score]
         if location:
-            sql += " AND p.location LIKE ?"
+            query += " AND p.location LIKE %s"
             params.append(f"%{location}%")
-        sql += " ORDER BY p.score DESC, p.first_seen DESC LIMIT ?"
+        query += " ORDER BY p.score DESC, p.first_seen DESC LIMIT %s"
         params.append(limit)
-        yield from self.conn.execute(sql, params)
+        yield from self.conn.execute(query, params)
 
-    def get_posting(self, key: str) -> sqlite3.Row | None:
+    def get_posting(self, key: str) -> DictRow | None:
         return self.conn.execute(
-            "SELECT * FROM postings WHERE key=?", (key,)
+            "SELECT * FROM postings WHERE key=%s", (key,)
         ).fetchone()
 
     def stats(self) -> dict[str, int]:
@@ -116,15 +129,15 @@ class Store:
 
     # -- applications -----------------------------------------------------
 
-    def get_application(self, key: str) -> sqlite3.Row | None:
+    def get_application(self, key: str) -> DictRow | None:
         return self.conn.execute(
-            "SELECT * FROM applications WHERE posting_key=?", (key,)
+            "SELECT * FROM applications WHERE posting_key=%s", (key,)
         ).fetchone()
 
     def set_status(self, key: str, status: str, notes: str | None = None) -> None:
         self.conn.execute(
-            "UPDATE applications SET status=?, notes=COALESCE(?, notes), updated=? "
-            "WHERE posting_key=?",
+            "UPDATE applications SET status=%s, notes=COALESCE(%s, notes), updated=%s "
+            "WHERE posting_key=%s",
             (status, notes, datetime.utcnow().isoformat(), key),
         )
         self.conn.commit()
@@ -132,7 +145,7 @@ class Store:
     def set_letter(self, key: str, letter: str) -> None:
         """Save/edit the drafted letter text without touching status."""
         self.conn.execute(
-            "UPDATE applications SET letter=?, updated=? WHERE posting_key=?",
+            "UPDATE applications SET letter=%s, updated=%s WHERE posting_key=%s",
             (letter, datetime.utcnow().isoformat(), key),
         )
         self.conn.commit()
@@ -141,44 +154,44 @@ class Store:
 
     def get_document(self, doc_id: str) -> str:
         row = self.conn.execute(
-            "SELECT content FROM documents WHERE id=?", (doc_id,)
+            "SELECT content FROM documents WHERE id=%s", (doc_id,)
         ).fetchone()
         return row["content"] if row else ""
 
     def set_document(self, doc_id: str, content: str) -> None:
         now = datetime.utcnow().isoformat()
         self.conn.execute(
-            """INSERT INTO documents (id, content, updated) VALUES (?, ?, ?)
+            """INSERT INTO documents (id, content, updated) VALUES (%s, %s, %s)
                ON CONFLICT(id) DO UPDATE SET content=excluded.content, updated=excluded.updated""",
             (doc_id, content, now),
         )
         self.conn.commit()
 
-    def get_file(self, file_id: str) -> sqlite3.Row | None:
+    def get_file(self, file_id: str) -> DictRow | None:
         return self.conn.execute(
-            "SELECT id, filename, data, updated FROM files WHERE id=?", (file_id,)
+            "SELECT id, filename, data, updated FROM files WHERE id=%s", (file_id,)
         ).fetchone()
 
     def set_file(self, file_id: str, filename: str, data: bytes) -> None:
         now = datetime.utcnow().isoformat()
         self.conn.execute(
-            """INSERT INTO files (id, filename, data, updated) VALUES (?, ?, ?, ?)
+            """INSERT INTO files (id, filename, data, updated) VALUES (%s, %s, %s, %s)
                ON CONFLICT(id) DO UPDATE SET
                  filename=excluded.filename, data=excluded.data, updated=excluded.updated""",
-            (file_id, filename, sqlite3.Binary(data), now),
+            (file_id, filename, data, now),
         )
         self.conn.commit()
 
 
 @contextmanager
-def open_store(path: str | Path | None = None) -> Iterator[Store]:
-    """``with open_store(path) as store:`` — closes on every exit path.
+def open_store(dsn: str | None = None, schema: str | None = None) -> Iterator[Store]:
+    """``with open_store(dsn) as store:`` — closes on every exit path.
 
     The request handlers return early a dozen different ways; relying on each
     of them to remember ``store.close()`` was a connection leak waiting to
     happen.
     """
-    store = Store(path)
+    store = Store(dsn, schema=schema)
     try:
         yield store
     finally:

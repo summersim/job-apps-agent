@@ -10,11 +10,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-#: Repository root — the package's parent directory. Paths are anchored to
-#: the code rather than the current working directory so `fetch` and `serve`
-#: agree on where the database lives no matter where they're launched from.
+#: Repository root — the package's parent directory. `.env` is anchored here
+#: rather than the current working directory so `fetch` and `serve` agree on
+#: configuration no matter where they're launched from.
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
 
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 
@@ -45,13 +44,22 @@ KEYWORDS = [
 ]
 
 
-def default_db_path() -> str:
-    """``data/jobs.db`` in the repository root. Override with ``--db``.
+def database_url() -> str:
+    """Postgres connection string. Required; set ``DATABASE_URL`` (locally in
+    ``.env``, and as an environment variable in the Vercel project settings
+    for deployments). Override per-invocation with ``--db``.
 
-    Creating the directory is :class:`~jobs_agent.storage.Store`'s job, so
-    that merely asking for the path (``--help``) touches nothing on disk.
+    Read lazily rather than at import time, so importing this module (or
+    ``jobs_agent.web``) never requires it configured.
     """
-    return str(DATA_DIR / "jobs.db")
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Add it to .env locally (the Supabase "
+            "connection string), and as an environment variable in the "
+            "Vercel project settings for deployments."
+        )
+    return url
 
 
 def load_dotenv(path: str | Path | None = None) -> None:

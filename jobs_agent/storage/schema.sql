@@ -44,6 +44,6 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE TABLE IF NOT EXISTS files (
     id       TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
-    data     BLOB NOT NULL,
+    data     BYTEA NOT NULL,
     updated  TEXT NOT NULL
 );

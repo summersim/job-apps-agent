@@ -20,7 +20,7 @@ import asyncio
 import logging
 import sys
 
-from .config import KEYWORDS, default_db_path
+from .config import KEYWORDS
 from .pipeline import fetch_and_store
 from .sources import NoSourcesConfigured
 from .storage import open_store
@@ -70,13 +70,14 @@ def cmd_stats(args) -> None:
 def cmd_serve(args) -> None:
     from .web import serve
 
-    serve(db_path=args.db, port=args.port, open_browser=not args.no_browser)
+    serve(db=args.db, port=args.port, open_browser=not args.no_browser)
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="jobs_agent")
-    ap.add_argument("--db", default=default_db_path(),
-                    help="SQLite path (default: data/jobs.db in the project root)")
+    ap.add_argument("--db", default=None,
+                    help="Postgres connection string (default: DATABASE_URL "
+                         "from the environment/.env)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     f = sub.add_parser("fetch", help="pull, score, dedupe, and store postings")

@@ -57,6 +57,7 @@ POST_ROUTES = {
     "/api/documents": api.post_documents,
     "/api/profile": api.post_profile,
     "/api/profile/reset": api.post_profile_reset,
+    "/api/profile/chat": api.post_profile_chat,
 }
 
 

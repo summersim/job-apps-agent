@@ -6,6 +6,7 @@
   display: flex; flex-direction: column; gap: var(--space-8);
   max-width: 940px;
 }
+.profile:has(#panel-scoring:not([hidden])) { max-width: 1180px; }
 .panel { display: flex; flex-direction: column; gap: var(--space-8); }
 /* `display: flex` above would otherwise beat the hidden attribute's
    UA `display: none`, and both tabs would render at once. */
@@ -169,6 +170,52 @@
 
 .blocker-columns { display: flex; gap: var(--space-8); flex-wrap: wrap; }
 .blocker-columns .block { flex: 1 1 300px; max-width: none; }
+
+/* — scoring tab: manual fields and the chat assistant, side by side — */
+.scoring-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-8); align-items: start;
+}
+.scoring-fields { display: flex; flex-direction: column; gap: var(--space-8); min-width: 0; }
+
+.chat-card {
+  display: flex; flex-direction: column; gap: var(--space-3);
+  background: var(--color-surface); border-radius: 24px;
+  padding: 20px 22px; position: sticky; top: var(--space-8);
+}
+.chat-card h4 { margin: 0; }
+.chat-card h5 { margin: 0; font-size: 13px; }
+
+.chat-log {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  max-height: 360px; overflow-y: auto; padding-right: 2px;
+}
+.chat-msg { font-size: 13.5px; line-height: 1.5; padding: 8px 12px; border-radius: 16px; max-width: 92%; }
+.chat-msg-user { align-self: flex-end; background: var(--color-accent-2-600); color: var(--color-bg); }
+.chat-msg-assistant { align-self: flex-start; background: var(--color-neutral-100); color: var(--color-text); }
+
+.chat-proposal {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--color-bg); border-radius: 16px; padding: 14px 16px;
+}
+.chat-proposal-list {
+  margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6;
+  color: color-mix(in srgb, var(--color-text) 75%, transparent);
+}
+.chat-proposal-actions { display: flex; gap: var(--space-2); }
+
+.chat-input-row { display: flex; gap: var(--space-2); align-items: flex-end; }
+.chat-input-row textarea {
+  flex: 1; font: inherit; font-size: 13.5px; resize: vertical;
+  border-radius: 16px; border: 1px solid var(--color-divider);
+  padding: 8px 12px; background: var(--color-bg); color: var(--color-text);
+}
+.chat-input-row textarea:focus-visible { outline: none; border-color: var(--color-accent); }
+
+@media (max-width: 900px) {
+  .scoring-layout { grid-template-columns: 1fr; }
+  .chat-card { position: static; }
+}
 
 @media (max-width: 760px) {
   .page { padding: 8px 20px 44px; }

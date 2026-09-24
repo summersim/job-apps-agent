@@ -25,6 +25,7 @@ from ..profile import (
     parse_weights,
     save_profile,
 )
+from ..profile_chat import ChatError, chat_turn
 from ..sources import NoSourcesConfigured
 from ..storage import (
     DOC_CANDIDATE_NAME,
@@ -306,6 +307,48 @@ def post_profile_reset(store: Store, req: Request) -> Json:
     return Json({"ok": True, "profile": _profile_as_text(DEFAULT_PROFILE)})
 
 
+def post_profile_chat(store: Store, req: Request) -> Json:
+    """One turn of the scoring-profile chat assistant.
+
+    This never saves anything: it returns a proposed profile for the Scoring
+    profile tab to preview, and the candidate applies it (or not) through the
+    existing ``post_profile`` path — same validation, same save.
+    """
+    message = (req.payload.get("message") or "").strip()
+    if not message:
+        return error("missing message")
+
+    current = load_profile(store)
+    pending = req.payload.get("pending_proposal")
+    try:
+        draft = _merge_proposal(current, pending) if isinstance(pending, dict) else current
+    except ProfileError:
+        draft = current  # a stale/bad pending proposal — fall back to what's saved
+
+    try:
+        result = chat_turn(draft, req.payload.get("history") or [], message)
+    except ChatError as e:
+        return error(str(e))
+
+    proposal = result["proposal"]
+    if not proposal:
+        return Json({"reply": result["reply"], "proposal": None, "preview": None})
+
+    try:
+        merged = _merge_proposal(draft, proposal)
+    except ProfileError as e:
+        return Json({
+            "reply": f"{result['reply']} (I couldn't apply that: {e})",
+            "proposal": None,
+            "preview": None,
+        })
+    return Json({
+        "reply": result["reply"],
+        "proposal": proposal,
+        "preview": _profile_as_text(merged),
+    })
+
+
 # -- profile text round-trip ----------------------------------------------
 
 def _profile_as_text(profile) -> dict[str, str]:
@@ -336,4 +379,24 @@ def _profile_from_text(payload: dict, *, base):
     if "experience_blockers" in payload:
         changes["experience_blockers"] = parse_lines(payload["experience_blockers"])
     return replace(base, **changes)
+
+
+def _merge_proposal(base, proposal: dict):
+    """``base`` with the chat assistant's proposed fields substituted in, via
+    the same text round-trip (and so the same validation) manual edits go
+    through — a proposal is just another partial, full-value update."""
+    payload: dict[str, str] = {}
+    for field in ("target_titles", "domain_terms"):
+        if field in proposal:
+            value = proposal[field]
+            if not isinstance(value, dict):
+                raise ProfileError(f"{field}: expected a term -> weight mapping")
+            payload[field] = format_weights(value)
+    for field in ("title_blockers", "experience_blockers"):
+        if field in proposal:
+            value = proposal[field]
+            if not isinstance(value, list):
+                raise ProfileError(f"{field}: expected a list of terms")
+            payload[field] = format_lines(value)
+    return _profile_from_text(payload, base=base)
 

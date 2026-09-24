@@ -68,62 +68,89 @@
   </section>
 
   <section class="panel" id="panel-scoring" role="tabpanel" hidden>
-    <div class="block" data-field="target_titles" data-kind="weights">
-      <h4>Target titles</h4>
-      <p class="hint">Matched as a substring of the job title; only the best match counts,
-        so a title stuffed with synonyms can't inflate. A posting matching none of these
-        is dropped.</p>
-      <div class="chips" data-chips></div>
-      <details class="as-text">
-        <summary>Edit as text</summary>
-        <p class="hint">One <code>term = weight</code> per line.</p>
-        <textarea class="mono-box" rows="12" spellcheck="false" data-text></textarea>
-      </details>
-    </div>
+    <div class="scoring-layout">
+      <div class="scoring-fields">
+        <div class="block" data-field="target_titles" data-kind="weights">
+          <h4>Target titles</h4>
+          <p class="hint">Matched as a substring of the job title; only the best match counts,
+            so a title stuffed with synonyms can't inflate. A posting matching none of these
+            is dropped.</p>
+          <div class="chips" data-chips></div>
+          <details class="as-text">
+            <summary>Edit as text</summary>
+            <p class="hint">One <code>term = weight</code> per line.</p>
+            <textarea class="mono-box" rows="12" spellcheck="false" data-text></textarea>
+          </details>
+        </div>
 
-    <div class="block" data-field="domain_terms" data-kind="weights">
-      <h4>Domain terms</h4>
-      <p class="hint">Matched against title and description. These stack, capped at 30 so
-        keyword-stuffed adverts can't dominate.</p>
-      <div class="chips" data-chips></div>
-      <details class="as-text">
-        <summary>Edit as text</summary>
-        <p class="hint">One <code>term = weight</code> per line.</p>
-        <textarea class="mono-box" rows="12" spellcheck="false" data-text></textarea>
-      </details>
-    </div>
+        <div class="block" data-field="domain_terms" data-kind="weights">
+          <h4>Domain terms</h4>
+          <p class="hint">Matched against title and description. These stack, capped at 30 so
+            keyword-stuffed adverts can't dominate.</p>
+          <div class="chips" data-chips></div>
+          <details class="as-text">
+            <summary>Edit as text</summary>
+            <p class="hint">One <code>term = weight</code> per line.</p>
+            <textarea class="mono-box" rows="12" spellcheck="false" data-text></textarea>
+          </details>
+        </div>
 
-    <div class="blocker-columns">
-      <div class="block" data-field="title_blockers" data-kind="lines">
-        <h4>Title blockers</h4>
-        <p class="hint">In the title, these drop the posting outright. Seniority markers,
-          not topics. A trailing space is significant — <code>lead </code> avoids matching
-          "leadership" — and is marked <span class="chip-ws">␣</span> on the chip.</p>
-        <div class="chips" data-chips></div>
-        <details class="as-text">
-          <summary>Edit as text</summary>
-          <p class="hint">One term per line. Trailing spaces are preserved.</p>
-          <textarea class="mono-box" rows="10" spellcheck="false" data-text></textarea>
-        </details>
+        <div class="blocker-columns">
+          <div class="block" data-field="title_blockers" data-kind="lines">
+            <h4>Title blockers</h4>
+            <p class="hint">In the title, these drop the posting outright. Seniority markers,
+              not topics. A trailing space is significant — <code>lead </code> avoids matching
+              "leadership" — and is marked <span class="chip-ws">␣</span> on the chip.</p>
+            <div class="chips" data-chips></div>
+            <details class="as-text">
+              <summary>Edit as text</summary>
+              <p class="hint">One term per line. Trailing spaces are preserved.</p>
+              <textarea class="mono-box" rows="10" spellcheck="false" data-text></textarea>
+            </details>
+          </div>
+
+          <div class="block" data-field="experience_blockers" data-kind="lines">
+            <h4>Experience blockers</h4>
+            <p class="hint">Matched against the description. A posting containing any of them
+              is dropped.</p>
+            <div class="chips" data-chips></div>
+            <details class="as-text">
+              <summary>Edit as text</summary>
+              <p class="hint">One term per line. Trailing spaces are preserved.</p>
+              <textarea class="mono-box" rows="10" spellcheck="false" data-text></textarea>
+            </details>
+          </div>
+        </div>
+
+        <div class="save-row">
+          <button class="btn btn-primary" id="btn-save-profile">Save scoring profile</button>
+          <button class="btn btn-secondary" id="btn-reset-profile">Reset to defaults</button>
+          <span class="saved-note" id="profile-msg"></span>
+        </div>
       </div>
 
-      <div class="block" data-field="experience_blockers" data-kind="lines">
-        <h4>Experience blockers</h4>
-        <p class="hint">Matched against the description. A posting containing any of them
-          is dropped.</p>
-        <div class="chips" data-chips></div>
-        <details class="as-text">
-          <summary>Edit as text</summary>
-          <p class="hint">One term per line. Trailing spaces are preserved.</p>
-          <textarea class="mono-box" rows="10" spellcheck="false" data-text></textarea>
-        </details>
-      </div>
-    </div>
+      <aside class="chat-card" id="profile-chat">
+        <h4>Describe the role you want</h4>
+        <p class="hint">Tell the assistant about the role, and it will ask a few questions,
+          then propose target titles, domain terms, and blockers for you to review below.</p>
+        <div class="chat-log" id="chat-log"></div>
 
-    <div class="save-row">
-      <button class="btn btn-primary" id="btn-save-profile">Save scoring profile</button>
-      <button class="btn btn-secondary" id="btn-reset-profile">Reset to defaults</button>
-      <span class="saved-note" id="profile-msg"></span>
+        <div class="chat-proposal" id="chat-proposal" hidden>
+          <h5>Proposed changes</h5>
+          <ul class="chat-proposal-list" id="chat-proposal-list"></ul>
+          <div class="chat-proposal-actions">
+            <button class="btn btn-primary" id="chat-apply">Apply</button>
+            <button class="btn btn-ghost" id="chat-discard">Discard</button>
+          </div>
+        </div>
+
+        <div class="chat-input-row">
+          <textarea id="chat-input" rows="2"
+                    placeholder="e.g. I want compliance analyst roles in London, nothing senior…"></textarea>
+          <button class="btn btn-primary" id="chat-send">Send</button>
+        </div>
+        <span class="saved-note" id="chat-msg"></span>
+      </aside>
     </div>
   </section>
 </div>

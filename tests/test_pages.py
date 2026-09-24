@@ -33,6 +33,10 @@ def test_documents_page_also_shows_and_escapes_the_candidate_name():
     assert "&lt;script&gt;" in html
 
 
+def test_documents_page_includes_the_profile_chat():
+    assert 'id="profile-chat"' in pages.documents_page()
+
+
 def test_pages_have_no_placeholders_left():
     for html in (pages.queue_page("Jane"), pages.documents_page(),
                  pages.login_page(), pages.signup_page()):

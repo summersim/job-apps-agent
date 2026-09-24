@@ -350,5 +350,125 @@ el("btn-reset-profile").addEventListener("click", async () => {
   }
 });
 
+/* — profile chat — */
+
+let chatHistory = [];       // [{role: "user"|"assistant", content}]
+let pendingProposal = null; // the assistant's last structured proposal, or null
+let pendingPreview = null;  // the same proposal, merged and formatted for /api/profile
+
+const PROPOSAL_LABELS = {
+  target_titles: "Target titles",
+  domain_terms: "Domain terms",
+  title_blockers: "Title blockers",
+  experience_blockers: "Experience blockers",
+};
+
+function renderChatLog() {
+  const log = el("chat-log");
+  log.innerHTML = chatHistory
+    .map((m) => `<div class="chat-msg chat-msg-${m.role}">${escapeHtml(m.content)}</div>`)
+    .join("");
+  log.scrollTop = log.scrollHeight;
+}
+
+function describeProposalValue(value) {
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "(none)";
+  const terms = Object.entries(value).map(([term, weight]) => `${term} = ${weight}`);
+  return terms.length ? terms.join(", ") : "(none)";
+}
+
+function renderProposal() {
+  const box = el("chat-proposal");
+  box.hidden = !pendingProposal;
+  if (!pendingProposal) return;
+  el("chat-proposal-list").innerHTML = Object.entries(pendingProposal)
+    .map(([field, value]) => `<li><strong>${PROPOSAL_LABELS[field] || field}:</strong> `
+      + `${escapeHtml(describeProposalValue(value))}</li>`)
+    .join("");
+}
+
+async function sendChat() {
+  const input = el("chat-input");
+  const message = input.value.trim();
+  if (!message) return;
+
+  chatHistory.push({ role: "user", content: message });
+  renderChatLog();
+  input.value = "";
+
+  const btn = el("chat-send");
+  btn.disabled = true;
+  input.disabled = true;
+  setMsg("chat-msg", "");
+  try {
+    const res = await fetch("/api/profile/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        history: chatHistory.slice(0, -1),
+        pending_proposal: pendingProposal,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      chatHistory.push({ role: "assistant", content: data.reply });
+      renderChatLog();
+      pendingProposal = data.proposal || null;
+      pendingPreview = data.preview || null;
+      renderProposal();
+    } else {
+      setMsg("chat-msg", data.error || "The assistant couldn't respond.", true);
+    }
+  } catch {
+    setMsg("chat-msg", "The assistant couldn't respond.", true);
+  } finally {
+    btn.disabled = false;
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+el("chat-send").addEventListener("click", sendChat);
+el("chat-input").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    sendChat();
+  }
+});
+
+el("chat-apply").addEventListener("click", async () => {
+  if (!pendingPreview) return;
+  const btn = el("chat-apply");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pendingPreview),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      // Same echoed-canonical-representation contract as the manual save
+      // button — the chip editors refresh from exactly what was stored.
+      fillProfile(data.profile);
+      pendingProposal = null;
+      pendingPreview = null;
+      renderProposal();
+      setMsg("chat-msg", "Applied to the scoring profile.");
+    } else {
+      setMsg("chat-msg", data.error || "Could not apply the proposal.", true);
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el("chat-discard").addEventListener("click", () => {
+  pendingProposal = null;
+  pendingPreview = null;
+  renderProposal();
+});
+
 showTab(location.hash.slice(1));
 load();

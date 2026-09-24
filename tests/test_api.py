@@ -163,3 +163,86 @@ def test_reset_restores_the_defaults(store):
     assert api.post_profile_reset(store, api.Request()).status == 200
     assert load_profile(store) == DEFAULT_PROFILE
 
+
+# -- scoring profile chat --------------------------------------------------
+#
+# chat_turn talks to Gemini; every test here replaces it with a stub so
+# nothing hits the network. The endpoint itself never saves anything — that
+# only happens if the caller then POSTs the returned "preview" to
+# /api/profile, same as it would a manual edit.
+
+def test_chat_requires_a_message(store):
+    res = api.post_profile_chat(store, req(message=""))
+    assert res.status == 400
+
+
+def test_a_turn_with_no_proposal_returns_the_reply_only(store, monkeypatch):
+    monkeypatch.setattr("jobs_agent.web.api.chat_turn",
+                        lambda profile, history, message: {
+                            "reply": "What seniority should I exclude?",
+                            "proposal": None,
+                        })
+    res = api.post_profile_chat(store, req(message="I want compliance roles"))
+    assert res.status == 200
+    assert res.body == {
+        "reply": "What seniority should I exclude?",
+        "proposal": None,
+        "preview": None,
+    }
+
+
+def test_a_valid_proposal_returns_a_merged_preview(store, monkeypatch):
+    monkeypatch.setattr("jobs_agent.web.api.chat_turn",
+                        lambda profile, history, message: {
+                            "reply": "Added it.",
+                            "proposal": {"target_titles": {"aml analyst": 28}},
+                        })
+    res = api.post_profile_chat(store, req(message="also AML analyst"))
+    assert res.status == 200
+    assert res.body["proposal"] == {"target_titles": {"aml analyst": 28}}
+    assert res.body["preview"]["target_titles"] == "aml analyst = 28"
+    # nothing is saved by the chat endpoint itself
+    assert load_profile(store) == DEFAULT_PROFILE
+
+
+def test_an_invalid_proposal_degrades_to_a_reply(store, monkeypatch):
+    monkeypatch.setattr("jobs_agent.web.api.chat_turn",
+                        lambda profile, history, message: {
+                            "reply": "Here you go.",
+                            "proposal": {"target_titles": "not a mapping"},
+                        })
+    res = api.post_profile_chat(store, req(message="hello"))
+    assert res.status == 200
+    assert res.body["proposal"] is None
+    assert res.body["preview"] is None
+    assert "couldn't apply that" in res.body["reply"]
+
+
+def test_pending_proposal_is_merged_into_the_draft_passed_to_the_model(store, monkeypatch):
+    seen = {}
+
+    def fake_chat_turn(profile, history, message):
+        seen["draft"] = profile
+        return {"reply": "ok", "proposal": None}
+
+    monkeypatch.setattr("jobs_agent.web.api.chat_turn", fake_chat_turn)
+    api.post_profile_chat(store, req(
+        message="make it 30 instead",
+        pending_proposal={"target_titles": {"aml analyst": 28}},
+    ))
+    assert seen["draft"].target_titles == {"aml analyst": 28}
+    # the base profile (still saved) is untouched
+    assert load_profile(store) == DEFAULT_PROFILE
+
+
+def test_a_chat_error_is_returned_as_a_400(store, monkeypatch):
+    from jobs_agent.profile_chat import ChatError
+
+    def raise_it(profile, history, message):
+        raise ChatError("GEMINI_API_KEY is not set")
+
+    monkeypatch.setattr("jobs_agent.web.api.chat_turn", raise_it)
+    res = api.post_profile_chat(store, req(message="hello"))
+    assert res.status == 400
+    assert "GEMINI_API_KEY" in res.body["error"]
+

@@ -1,12 +1,19 @@
 """HTTP plumbing: route table, request parsing, response serialisation.
 
-Two pages:
+Four pages:
 
+  /login       sign in with an existing account
+  /signup      create an account
   /            job review queue — fetch, filter, shortlist/reject, and run
                the review-and-approve workflow below
   /documents   Profile page — candidate name, CV (uploaded as .docx or .pdf,
                text extracted), cover-letter template, and the scoring
                profile, stored once and reused for every draft
+
+Every page and API route except /login, /signup, and /static/* requires a
+signed-in session (see auth.py, backed by Supabase Auth) and operates on
+that account's own data only — see storage/store.py, where every query is
+scoped to the signed-in user's id.
 
 Review workflow: "Prepare application" drafts a letter tailored to that
 posting (see letters/) and sets it to "drafted". A human reads it, edits it,
@@ -27,7 +34,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ..profile import load_profile
 from ..storage import DOC_CANDIDATE_NAME, open_store
-from . import api, pages
+from . import api, auth, pages
 
 #: path -> endpoint, per method. Adding an endpoint means one entry here and
 #: one function in api.py.
@@ -63,53 +70,109 @@ class Handler(BaseHTTPRequestHandler):
     # -- responses --------------------------------------------------------
 
     def _send(self, body: bytes, content_type: str, status: int = 200,
-              extra_headers: dict[str, str] | None = None) -> None:
+              extra_headers: list[tuple[str, str]] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        for name, value in (extra_headers or {}).items():
+        for name, value in (extra_headers or []):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_result(self, result) -> None:
+    def _send_result(self, result, extra_headers: list[tuple[str, str]] | None = None) -> None:
         """Serialise whatever an endpoint returned."""
         if isinstance(result, api.File):
-            self._send(
-                result.data, result.content_type,
-                extra_headers={
-                    "Content-Disposition":
-                        f'attachment; filename="{result.filename}"',
-                },
-            )
+            headers = list(extra_headers or [])
+            headers.append(("Content-Disposition",
+                            f'attachment; filename="{result.filename}"'))
+            self._send(result.data, result.content_type, extra_headers=headers)
         else:
             self._send(json.dumps(result.body).encode(),
-                       "application/json", result.status)
+                       "application/json", result.status, extra_headers)
 
-    def _send_html(self, html: str) -> None:
-        self._send(html.encode(), "text/html; charset=utf-8")
+    def _send_html(self, html: str, extra_headers: list[tuple[str, str]] | None = None) -> None:
+        self._send(html.encode(), "text/html; charset=utf-8", extra_headers=extra_headers)
 
     def _not_found(self) -> None:
         self._send(json.dumps({"error": "not found"}).encode(),
                    "application/json", 404)
+
+    def _candidate_name(self, store) -> str:
+        """The name shown in the nav on every authenticated page, not just
+        the Profile page it's set on."""
+        name = store.get_document(DOC_CANDIDATE_NAME).strip()
+        return name or load_profile(store).name
+
+    def _unauthorized(self) -> None:
+        self._send(json.dumps({"error": "not authenticated"}).encode(),
+                   "application/json", 401)
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    # -- auth ---------------------------------------------------------------
+
+    def _authenticate(self) -> auth.AuthResult | None:
+        cookies = auth.parse_cookies(self.headers.get("Cookie"))
+        return auth.resolve(cookies)
+
+    def _session_headers(self, result: auth.AuthResult) -> list[tuple[str, str]]:
+        """Set-Cookie headers for a session that was silently refreshed while
+        resolving this request; empty when nothing needs to change."""
+        if not result.refreshed:
+            return []
+        return [("Set-Cookie", v) for v in auth.set_cookie_headers(result.refreshed)]
+
+    def _handle_signup(self, payload: dict) -> None:
+        email, password = (payload.get("email") or "").strip(), payload.get("password") or ""
+        if not email or not password:
+            self._send(json.dumps({"error": "Email and password are required."}).encode(),
+                       "application/json", 400)
+            return
+        try:
+            session = auth.sign_up(email, password)
+        except auth.AuthError as e:
+            self._send(json.dumps({"error": str(e)}).encode(), "application/json", 400)
+            return
+        if session is None:
+            self._send(json.dumps({
+                "ok": True,
+                "message": "Check your email to confirm your account, then log in.",
+            }).encode(), "application/json")
+            return
+        headers = [("Set-Cookie", v) for v in auth.set_cookie_headers(session)]
+        self._send(json.dumps({"ok": True}).encode(), "application/json", 200, headers)
+
+    def _handle_login(self, payload: dict) -> None:
+        email, password = (payload.get("email") or "").strip(), payload.get("password") or ""
+        if not email or not password:
+            self._send(json.dumps({"error": "Email and password are required."}).encode(),
+                       "application/json", 400)
+            return
+        try:
+            session = auth.sign_in(email, password)
+        except auth.AuthError as e:
+            self._send(json.dumps({"error": str(e)}).encode(), "application/json", 400)
+            return
+        headers = [("Set-Cookie", v) for v in auth.set_cookie_headers(session)]
+        self._send(json.dumps({"ok": True}).encode(), "application/json", 200, headers)
+
+    def _handle_logout(self) -> None:
+        cookies = auth.parse_cookies(self.headers.get("Cookie"))
+        access = cookies.get(auth.ACCESS_COOKIE)
+        if access:
+            auth.sign_out(access)
+        headers = [("Set-Cookie", v) for v in auth.clear_cookie_headers()]
+        self._send(json.dumps({"ok": True}).encode(), "application/json", 200, headers)
 
     # -- routing ----------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         parsed = urlparse(self.path)
         path = parsed.path
-
-        if path == "/":
-            with open_store(self.db) as store:
-                name = store.get_document(DOC_CANDIDATE_NAME).strip()
-                if not name:
-                    name = load_profile(store).name
-            self._send_html(pages.queue_page(name))
-            return
-
-        if path == "/documents":
-            self._send_html(pages.documents_page())
-            return
 
         if path.startswith("/static/"):
             asset = pages.static_asset(path[len("/static/"):])
@@ -120,24 +183,71 @@ class Handler(BaseHTTPRequestHandler):
             self._send(body, content_type)
             return
 
+        if path == "/login":
+            self._send_html(pages.login_page())
+            return
+
+        if path == "/signup":
+            self._send_html(pages.signup_page())
+            return
+
+        result = self._authenticate()
+        if result is None:
+            if path.startswith("/api/"):
+                self._unauthorized()
+            else:
+                self._redirect("/login")
+            return
+        extra_headers = self._session_headers(result)
+
+        if path == "/":
+            with open_store(self.db, user_id=result.user_id) as store:
+                name = self._candidate_name(store)
+            self._send_html(pages.queue_page(name), extra_headers)
+            return
+
+        if path == "/documents":
+            with open_store(self.db, user_id=result.user_id) as store:
+                name = self._candidate_name(store)
+            self._send_html(pages.documents_page(name), extra_headers)
+            return
+
         endpoint = GET_ROUTES.get(path)
         if endpoint is None:
             self._not_found()
             return
         request = api.Request(query=parse_qs(parsed.query))
-        with open_store(self.db) as store:
-            self._send_result(endpoint(store, request))
+        with open_store(self.db, user_id=result.user_id) as store:
+            self._send_result(endpoint(store, request), extra_headers)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        payload = self._read_json()
+
+        if path == "/api/signup":
+            self._handle_signup(payload)
+            return
+        if path == "/api/login":
+            self._handle_login(payload)
+            return
+        if path == "/api/logout":
+            self._handle_logout()
+            return
+
         endpoint = POST_ROUTES.get(path)
         if endpoint is None:
             self._not_found()
             return
 
-        request = api.Request(payload=self._read_json())
-        with open_store(self.db) as store:
-            self._send_result(endpoint(store, request))
+        result = self._authenticate()
+        if result is None:
+            self._unauthorized()
+            return
+        extra_headers = self._session_headers(result)
+
+        request = api.Request(payload=payload)
+        with open_store(self.db, user_id=result.user_id) as store:
+            self._send_result(endpoint(store, request), extra_headers)
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

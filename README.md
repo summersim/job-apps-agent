@@ -16,6 +16,8 @@ cp .env.example .env    # then fill it in, or export the keys directly
 | Variable | Needed for | Where |
 |---|---|---|
 | `DATABASE_URL` | everything | Supabase project -> Settings -> Database -> Connection string |
+| `SUPABASE_URL` | signup/login | Supabase project -> Settings -> API -> Project URL |
+| `SUPABASE_ANON_KEY` | signup/login | Supabase project -> Settings -> API -> Project API keys -> anon public |
 | `REED_API_KEY` | fetching | https://www.reed.co.uk/developers/jobseeker |
 | `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | fetching | https://developer.adzuna.com/ |
 | `GEMINI_API_KEY` | drafting cover letters | https://aistudio.google.com/apikey |
@@ -26,10 +28,13 @@ a few minutes. Either board works on its own; a missing key skips that board
 with a warning rather than failing.
 
 ```bash
-python -m jobs_agent fetch
-python -m jobs_agent queue --min-score 40
-python -m jobs_agent stats
-python -m jobs_agent serve       # web UI over all of the above
+python -m jobs_agent serve                          # web UI: sign up, then use it from the browser
+
+# CLI commands operate on one account's data, so they need its Supabase Auth
+# user id (Supabase dashboard -> Authentication -> Users -> copy the UID):
+python -m jobs_agent fetch --user <user-id>
+python -m jobs_agent queue --user <user-id> --min-score 40
+python -m jobs_agent stats --user <user-id>
 ```
 
 `.env` is read from the repository root, so the commands agree with each
@@ -39,7 +44,11 @@ with `--db`.
 
 ## Web UI
 
-`python -m jobs_agent serve` opens a local review UI with two pages:
+`python -m jobs_agent serve` opens a local review UI. `/signup` creates an
+account and `/login` signs into one (both via Supabase Auth); every other
+page requires a signed-in session and shows only that account's own data —
+see **Accounts and data segregation** below. Once signed in, there are two
+pages:
 
 - **Job Queue** (`/`) — fetch, filter by status/score/location (defaults to
   "Central London" — clear the box for anywhere), and move postings through
@@ -52,6 +61,23 @@ the original file (`files` table, re-downloadable from the page) and its
 extracted text, the example letter and your name as text, and the scoring
 profile as JSON (all in the `documents` table). Re-uploading or re-saving
 overwrites in place; restarting the server keeps everything.
+
+## Accounts and data segregation
+
+Signup and login are handled by Supabase Auth (email + password) over its
+REST API — see `web/auth.py`. A session is two httpOnly cookies (an access
+token and a longer-lived refresh token); an expired access token is silently
+refreshed from the refresh token on the next request. No password or session
+token is ever stored in this app's own database.
+
+Every table (`postings`, `applications`, `documents`, `files`) carries a
+`user_id` column, and `storage/store.py`'s `Store` is constructed with one
+signed-in user's id and scopes every query to it — see
+`test_data_is_isolated_between_users` in `tests/test_store.py`. Postings are
+fetched and stored independently per account rather than shared, so two
+accounts can never see each other's queue, CV, letters, or scoring profile,
+at the cost of each account triggering its own job-board API calls even for
+an identical search.
 
 **Review workflow**, backed by the `applications.status` column:
 
@@ -78,10 +104,11 @@ jobs_agent/
   pipeline.py     fetch -> score -> dedupe -> store, shared by CLI and web
   cli.py          argument parsing and console output only
   sources/        one module per job board, over a shared HTTP base
-  storage/        schema.sql and the Postgres Store
+  storage/        schema.sql and the Postgres Store (every table user_id-scoped)
   extract/        .docx / .pdf -> plain text
   letters/        drafting prompts, and the model call that runs them
-  web/            server, route table, API endpoints, and static/ assets
+  web/            server, route table, API endpoints, Supabase Auth (auth.py),
+                  and static/ assets
 tests/            run with: python -m pytest
 ```
 
@@ -137,8 +164,9 @@ transition otherwise, not just the UI.
   roles with fresh dates; the dedupe catches most, not all.
 - Editing the scoring profile affects the next fetch. Postings already in the
   queue keep the score they were stored with.
-- The server binds to `127.0.0.1` and has no authentication — it is a local
-  single-user tool, not something to expose.
+- Session cookies get the `Secure` flag only when `VERCEL` is set in the
+  environment (see `web/auth.py`), so `serve`'s local `http://127.0.0.1`
+  cookies stay usable; don't run this behind a real domain over plain HTTP.
 
 ## Next
 

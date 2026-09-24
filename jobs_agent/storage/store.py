@@ -1,4 +1,5 @@
-"""Postgres store. Deduplicates across sources and across runs."""
+"""Postgres store. Deduplicates across sources and across runs, scoped to
+one Supabase Auth user at a time."""
 
 from __future__ import annotations
 
@@ -26,11 +27,18 @@ DOC_SCORING_PROFILE = "scoring_profile"
 
 
 class Store:
-    def __init__(self, dsn: str | None = None, schema: str | None = None):
-        """Connect to Postgres. ``schema`` isolates the tables under their
-        own schema (rather than ``public``) instead of a separate database —
-        used by tests to run in isolation against the same Supabase instance.
+    def __init__(self, dsn: str | None = None, *, user_id: str, schema: str | None = None):
+        """Connect to Postgres, scoped to ``user_id`` (a Supabase Auth user
+        id). Every read and write this Store makes is filtered to, or
+        tagged with, that user — the one place data segregation between
+        accounts is enforced.
+
+        ``schema`` isolates the tables under their own schema (rather than
+        ``public``) instead of a separate database — used by tests to run in
+        isolation against the same Supabase instance.
         """
+        self.user_id = user_id
+        self.schema = schema
         self.conn = psycopg.connect(dsn or database_url(), row_factory=dict_row)
         with self.conn.cursor() as cur:
             if schema:
@@ -65,14 +73,18 @@ class Store:
         new = dup = 0
         now = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
+        uid = self.user_id
 
         for p in postings:
-            if cur.execute("SELECT 1 FROM postings WHERE key=%s", (p.key,)).fetchone():
+            if cur.execute(
+                "SELECT 1 FROM postings WHERE user_id=%s AND key=%s", (uid, p.key)
+            ).fetchone():
                 dup += 1
                 continue
 
             soft_hits = cur.execute(
-                "SELECT description FROM postings WHERE soft_key=%s", (p.soft_key,)
+                "SELECT description FROM postings WHERE user_id=%s AND soft_key=%s",
+                (uid, p.soft_key),
             ).fetchall()
             if any(_overlap(p.description, row["description"]) > 0.75 for row in soft_hits):
                 dup += 1
@@ -80,12 +92,12 @@ class Store:
 
             cur.execute(
                 """INSERT INTO postings
-                   (key, soft_key, source, source_id, title, employer, location,
-                    description, url, posted, salary_min, salary_max,
+                   (user_id, key, soft_key, source, source_id, title, employer,
+                    location, description, url, posted, salary_min, salary_max,
                     contract_type, via_agency, score, score_reasons, first_seen)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    p.key, p.soft_key, p.source, p.source_id, p.title, p.employer,
+                    uid, p.key, p.soft_key, p.source, p.source_id, p.title, p.employer,
                     p.location, p.description, p.url,
                     p.posted.isoformat() if p.posted else None,
                     p.salary_min, p.salary_max, p.contract_type,
@@ -94,9 +106,9 @@ class Store:
                 ),
             )
             cur.execute(
-                "INSERT INTO applications (posting_key, status, updated) "
-                "VALUES (%s, 'new', %s) ON CONFLICT (posting_key) DO NOTHING",
-                (p.key, now),
+                "INSERT INTO applications (user_id, posting_key, status, updated) "
+                "VALUES (%s, %s, 'new', %s) ON CONFLICT (user_id, posting_key) DO NOTHING",
+                (uid, p.key, now),
             )
             new += 1
 
@@ -106,9 +118,9 @@ class Store:
     def queue(self, min_score: int = 0, limit: int = 50,
               status: str = "new", location: str | None = None) -> Iterator[DictRow]:
         query = """SELECT p.*, a.status, a.letter, a.notes, a.updated FROM postings p
-                 JOIN applications a ON a.posting_key = p.key
-                 WHERE a.status = %s AND p.score >= %s"""
-        params: list = [status, min_score]
+                 JOIN applications a ON a.user_id = p.user_id AND a.posting_key = p.key
+                 WHERE p.user_id = %s AND a.status = %s AND p.score >= %s"""
+        params: list = [self.user_id, status, min_score]
         if location:
             query += " AND p.location LIKE %s"
             params.append(f"%{location}%")
@@ -118,12 +130,13 @@ class Store:
 
     def get_posting(self, key: str) -> DictRow | None:
         return self.conn.execute(
-            "SELECT * FROM postings WHERE key=%s", (key,)
+            "SELECT * FROM postings WHERE user_id=%s AND key=%s", (self.user_id, key)
         ).fetchone()
 
     def stats(self) -> dict[str, int]:
         rows = self.conn.execute(
-            "SELECT status, COUNT(*) c FROM applications GROUP BY status"
+            "SELECT status, COUNT(*) c FROM applications WHERE user_id=%s GROUP BY status",
+            (self.user_id,),
         ).fetchall()
         return {r["status"]: r["c"] for r in rows}
 
@@ -131,22 +144,24 @@ class Store:
 
     def get_application(self, key: str) -> DictRow | None:
         return self.conn.execute(
-            "SELECT * FROM applications WHERE posting_key=%s", (key,)
+            "SELECT * FROM applications WHERE user_id=%s AND posting_key=%s",
+            (self.user_id, key),
         ).fetchone()
 
     def set_status(self, key: str, status: str, notes: str | None = None) -> None:
         self.conn.execute(
             "UPDATE applications SET status=%s, notes=COALESCE(%s, notes), updated=%s "
-            "WHERE posting_key=%s",
-            (status, notes, datetime.utcnow().isoformat(), key),
+            "WHERE user_id=%s AND posting_key=%s",
+            (status, notes, datetime.utcnow().isoformat(), self.user_id, key),
         )
         self.conn.commit()
 
     def set_letter(self, key: str, letter: str) -> None:
         """Save/edit the drafted letter text without touching status."""
         self.conn.execute(
-            "UPDATE applications SET letter=%s, updated=%s WHERE posting_key=%s",
-            (letter, datetime.utcnow().isoformat(), key),
+            "UPDATE applications SET letter=%s, updated=%s "
+            "WHERE user_id=%s AND posting_key=%s",
+            (letter, datetime.utcnow().isoformat(), self.user_id, key),
         )
         self.conn.commit()
 
@@ -154,44 +169,50 @@ class Store:
 
     def get_document(self, doc_id: str) -> str:
         row = self.conn.execute(
-            "SELECT content FROM documents WHERE id=%s", (doc_id,)
+            "SELECT content FROM documents WHERE user_id=%s AND id=%s",
+            (self.user_id, doc_id),
         ).fetchone()
         return row["content"] if row else ""
 
     def set_document(self, doc_id: str, content: str) -> None:
         now = datetime.utcnow().isoformat()
         self.conn.execute(
-            """INSERT INTO documents (id, content, updated) VALUES (%s, %s, %s)
-               ON CONFLICT(id) DO UPDATE SET content=excluded.content, updated=excluded.updated""",
-            (doc_id, content, now),
+            """INSERT INTO documents (user_id, id, content, updated) VALUES (%s, %s, %s, %s)
+               ON CONFLICT(user_id, id) DO UPDATE
+                 SET content=excluded.content, updated=excluded.updated""",
+            (self.user_id, doc_id, content, now),
         )
         self.conn.commit()
 
     def get_file(self, file_id: str) -> DictRow | None:
         return self.conn.execute(
-            "SELECT id, filename, data, updated FROM files WHERE id=%s", (file_id,)
+            "SELECT id, filename, data, updated FROM files WHERE user_id=%s AND id=%s",
+            (self.user_id, file_id),
         ).fetchone()
 
     def set_file(self, file_id: str, filename: str, data: bytes) -> None:
         now = datetime.utcnow().isoformat()
         self.conn.execute(
-            """INSERT INTO files (id, filename, data, updated) VALUES (%s, %s, %s, %s)
-               ON CONFLICT(id) DO UPDATE SET
+            """INSERT INTO files (user_id, id, filename, data, updated)
+               VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT(user_id, id) DO UPDATE SET
                  filename=excluded.filename, data=excluded.data, updated=excluded.updated""",
-            (file_id, filename, data, now),
+            (self.user_id, file_id, filename, data, now),
         )
         self.conn.commit()
 
 
 @contextmanager
-def open_store(dsn: str | None = None, schema: str | None = None) -> Iterator[Store]:
-    """``with open_store(dsn) as store:`` — closes on every exit path.
+def open_store(dsn: str | None = None, *, user_id: str,
+               schema: str | None = None) -> Iterator[Store]:
+    """``with open_store(dsn, user_id=...) as store:`` — closes on every exit
+    path.
 
     The request handlers return early a dozen different ways; relying on each
     of them to remember ``store.close()`` was a connection leak waiting to
     happen.
     """
-    store = Store(dsn, schema=schema)
+    store = Store(dsn, user_id=user_id, schema=schema)
     try:
         yield store
     finally:

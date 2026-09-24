@@ -40,13 +40,19 @@ async def fetch_and_store(store: Store, *, per_keyword: int = 200,
                           keywords: list[str] | None = None) -> FetchResult:
     """Fetch every keyword from every configured board and stage the results.
 
+    The keywords searched are the profile's target titles — what actually
+    gets fetched should track what scoring will accept, or a profile aimed at
+    a different field just gets zero matches back. ``KEYWORDS`` is only a
+    fallback for a profile with no target titles set at all.
+
     Raises :class:`~jobs_agent.sources.NoSourcesConfigured` when no board has
     credentials — callers decide whether that's an exit or an HTTP 400.
     """
     sources, warnings = build_sources()
     profile = load_profile(store)
 
-    raw = await gather_all(sources, keywords or KEYWORDS, per_keyword=per_keyword)
+    search_terms = keywords or list(profile.target_titles) or KEYWORDS
+    raw = await gather_all(sources, search_terms, per_keyword=per_keyword)
     kept = score_all(raw, profile)
     new, dup = store.upsert(kept)
 

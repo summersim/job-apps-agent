@@ -62,6 +62,37 @@ def database_url() -> str:
     return url
 
 
+def supabase_url() -> str:
+    """Supabase project URL, used for Auth (signup/login/session) over its
+    REST API. Project Settings -> API -> Project URL.
+
+    Read lazily, same reasoning as :func:`database_url`.
+    """
+    url = os.getenv("SUPABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "SUPABASE_URL is not set. Add it to .env locally (Project "
+            "Settings -> API -> Project URL), and as an environment "
+            "variable in the Vercel project settings for deployments."
+        )
+    return url.rstrip("/")
+
+
+def supabase_anon_key() -> str:
+    """Supabase anon/public API key, sent as the ``apikey`` header on every
+    Auth call. Project Settings -> API -> Project API keys -> anon public.
+    """
+    key = os.getenv("SUPABASE_ANON_KEY")
+    if not key:
+        raise RuntimeError(
+            "SUPABASE_ANON_KEY is not set. Add it to .env locally (Project "
+            "Settings -> API -> Project API keys -> anon public), and as an "
+            "environment variable in the Vercel project settings for "
+            "deployments."
+        )
+    return key
+
+
 def load_dotenv(path: str | Path | None = None) -> None:
     """Read KEY=VALUE lines from a .env file into ``os.environ``.
 

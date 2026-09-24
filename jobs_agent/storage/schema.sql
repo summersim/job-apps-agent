@@ -1,5 +1,13 @@
+-- Every table is scoped by user_id (a Supabase Auth user id) so that each
+-- signed-in account only ever sees its own postings, applications, and
+-- documents. Not a foreign key into auth.users: that would make the
+-- per-test isolated schema (see conftest.py) require real Supabase Auth
+-- users to exist, and the app already only ever passes a user_id that came
+-- from a verified Supabase session, so the FK would buy little.
+
 CREATE TABLE IF NOT EXISTS postings (
-    key           TEXT PRIMARY KEY,
+    user_id       UUID NOT NULL,
+    key           TEXT NOT NULL,
     soft_key      TEXT NOT NULL,
     source        TEXT NOT NULL,
     source_id     TEXT NOT NULL,
@@ -15,35 +23,43 @@ CREATE TABLE IF NOT EXISTS postings (
     via_agency    INTEGER,
     score         INTEGER DEFAULT 0,
     score_reasons TEXT,
-    first_seen    TEXT NOT NULL
+    first_seen    TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
 );
-CREATE INDEX IF NOT EXISTS idx_postings_soft ON postings(soft_key);
-CREATE INDEX IF NOT EXISTS idx_postings_score ON postings(score DESC);
+CREATE INDEX IF NOT EXISTS idx_postings_soft ON postings(user_id, soft_key);
+CREATE INDEX IF NOT EXISTS idx_postings_score ON postings(user_id, score DESC);
 
 CREATE TABLE IF NOT EXISTS applications (
-    posting_key TEXT PRIMARY KEY REFERENCES postings(key),
+    user_id     UUID NOT NULL,
+    posting_key TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'new',
     letter      TEXT,
     notes       TEXT,
-    updated     TEXT NOT NULL
+    updated     TEXT NOT NULL,
+    PRIMARY KEY (user_id, posting_key),
+    FOREIGN KEY (user_id, posting_key) REFERENCES postings(user_id, key)
 );
 
--- Candidate materials and settings, one row per document id: 'cv' (extracted
--- text), 'cv_filename', 'cover_letter_template', 'candidate_name', and
--- 'scoring_profile' (the JSON-encoded Profile). Small and few, so no history
--- — the UI overwrites in place.
+-- Candidate materials and settings, one row per (user, document id): 'cv'
+-- (extracted text), 'cv_filename', 'cover_letter_template', 'candidate_name',
+-- and 'scoring_profile' (the JSON-encoded Profile). Small and few per user,
+-- so no history — the UI overwrites in place.
 CREATE TABLE IF NOT EXISTS documents (
-    id      TEXT PRIMARY KEY,
+    user_id UUID NOT NULL,
+    id      TEXT NOT NULL,
     content TEXT NOT NULL DEFAULT '',
-    updated TEXT NOT NULL
+    updated TEXT NOT NULL,
+    PRIMARY KEY (user_id, id)
 );
 
 -- The original uploaded CV file, kept verbatim so the document itself
 -- persists (re-downloadable, re-extractable), not just the text pulled from
--- it. One row, id 'cv'.
+-- it. One row per user, id 'cv'.
 CREATE TABLE IF NOT EXISTS files (
-    id       TEXT PRIMARY KEY,
+    user_id  UUID NOT NULL,
+    id       TEXT NOT NULL,
     filename TEXT NOT NULL,
     data     BYTEA NOT NULL,
-    updated  TEXT NOT NULL
+    updated  TEXT NOT NULL,
+    PRIMARY KEY (user_id, id)
 );

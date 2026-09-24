@@ -85,7 +85,7 @@ def error(message: str, status: int = 400) -> Json:
 
 
 def _row_to_dict(row) -> dict:
-    return {k: row[k] for k in row.keys()}
+    return {k: row[k] for k in row.keys() if k != "user_id"}
 
 
 # -- GET ------------------------------------------------------------------

@@ -1,0 +1,52 @@
+/* Centered card for the signed-out /login and /signup pages. */
+
+body { min-height: 100vh; }
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.auth-card {
+  width: min(380px, 100%);
+  gap: var(--space-3);
+}
+
+.auth-card .nav-brand {
+  font-size: 18px;
+}
+
+.auth-card h3 {
+  margin: 0 0 var(--space-1);
+}
+
+.auth-card p.hint {
+  margin: 0;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.auth-msg {
+  margin: 0;
+  font-size: 13px;
+  min-height: 1em;
+  color: var(--color-accent-2-700);
+}
+.auth-msg.err {
+  color: var(--color-accent-700);
+}
+
+.auth-switch {
+  margin: 0;
+  font-size: 13px;
+  text-align: center;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}

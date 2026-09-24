@@ -15,10 +15,11 @@ from jobs_agent.storage import Store  # noqa: E402
 def store():
     """A Store isolated in its own throwaway Postgres schema, dropped after
     the test — tests share the Supabase instance used for dev/prod without
-    stepping on each other's data.
+    stepping on each other's data. Scoped to a random user id, same as a
+    real signed-in request would be.
     """
     schema = f"test_{uuid4().hex}"
-    s = Store(schema=schema)
+    s = Store(user_id=str(uuid4()), schema=schema)
     yield s
     with s.conn.cursor() as cur:
         cur.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))

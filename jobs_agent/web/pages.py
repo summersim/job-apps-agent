@@ -26,9 +26,11 @@ NAV_ITEMS = (
 )
 
 
-def nav(active: str, who: str = "") -> str:
+def nav(active: str, who: str = "", show_logout: bool = False) -> str:
     """The top bar. ``who`` is the candidate's name, shown as a trailing slug
-    on pages that are about their queue.
+    on every authenticated page (not just the one it's set on). ``show_logout``
+    adds a "Log out" control — every authenticated page has one; the signed-out
+    /login and /signup pages don't call this at all.
 
     The active link is marked with ``aria-current`` rather than a class: the
     design system styles that attribute directly, and it is what a screen
@@ -39,8 +41,10 @@ def nav(active: str, who: str = "") -> str:
         current = ' aria-current="page"' if key == active else ""
         links.append(f'<a href="{path}"{current}>{label}</a>')
     slug = f'<span class="nav-who">{escape(who)}</span>' if who else ""
+    logout = ('<button class="btn btn-ghost" id="nav-logout" type="button">Log out</button>'
+              if show_logout else "")
     return ('<nav class="nav"><span class="nav-brand">Jobs Agent</span>'
-            + "".join(links) + slug + "</nav>")
+            + "".join(links) + slug + logout + "</nav>")
 
 
 def render(name: str, **fields: str) -> str:
@@ -56,11 +60,19 @@ def render(name: str, **fields: str) -> str:
 
 
 def queue_page(candidate_name: str) -> str:
-    return render("queue.html", nav=nav("queue", candidate_name))
+    return render("queue.html", nav=nav("queue", candidate_name, show_logout=True))
 
 
-def documents_page() -> str:
-    return render("documents.html", nav=nav("documents"))
+def documents_page(candidate_name: str = "") -> str:
+    return render("documents.html", nav=nav("documents", candidate_name, show_logout=True))
+
+
+def login_page() -> str:
+    return render("login.html")
+
+
+def signup_page() -> str:
+    return render("signup.html")
 
 
 def static_asset(name: str) -> tuple[bytes, str] | None:

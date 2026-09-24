@@ -1,6 +1,10 @@
 """Store: dedupe on insert, and the document/file round-trips."""
 
+from uuid import uuid4
+
 from conftest import make_posting
+
+from jobs_agent.storage import Store
 
 
 def test_exact_duplicate_is_suppressed(store):
@@ -59,3 +63,23 @@ def test_documents_and_files_overwrite_in_place(store):
     row = store.get_file("cv")
     assert row["filename"] == "cv2.pdf"
     assert bytes(row["data"]) == b"%PDF-1.7"
+
+
+def test_data_is_isolated_between_users(store):
+    """A second account sharing the same tables sees none of the first
+    user's postings, applications, documents, or files."""
+    p = make_posting()
+    store.upsert([p])
+    store.set_document("cv", "first user's cv text")
+    store.set_file("cv", "cv.pdf", b"%PDF-1.4")
+
+    other = Store(user_id=str(uuid4()), schema=store.schema)
+    try:
+        assert list(other.queue()) == []
+        assert other.get_posting(p.key) is None
+        assert other.get_application(p.key) is None
+        assert other.stats() == {}
+        assert other.get_document("cv") == ""
+        assert other.get_file("cv") is None
+    finally:
+        other.close()

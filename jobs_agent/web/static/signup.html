@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign up — Jobs Agent</title>
+<link rel="stylesheet" href="/static/ds-styles.css">
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<div class="auth-shell">
+  <div class="card elev-md auth-card">
+    <span class="nav-brand">Jobs Agent</span>
+    <h3>Create an account</h3>
+    <p class="hint">Your queue, CV, and scoring profile — private to your account.</p>
+    <form id="auth-form" data-mode="signup">
+      <div class="field">
+        <label for="email">Email</label>
+        <input class="input" id="email" name="email" type="email" required autocomplete="email">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input class="input" id="password" name="password" type="password" required
+               minlength="6" autocomplete="new-password">
+      </div>
+      <button class="btn btn-primary btn-block" type="submit">Sign up</button>
+      <p class="auth-msg" id="auth-msg"></p>
+    </form>
+    <p class="auth-switch">Already have an account? <a href="/login">Log in</a></p>
+  </div>
+</div>
+<script src="/static/auth.js"></script>
+</body>
+</html>

@@ -57,7 +57,7 @@ class Profile:
 
 
 DEFAULT_PROFILE = Profile(
-    name="Nicole Ng Yuet Thung",
+    name="",
     location="London",
     target_titles={
         # Compliance / financial crime — best fit for the MSc Law and Finance,

@@ -225,7 +225,7 @@ function emptyState() {
     <div class="empty-state">
       <div class="orb"></div>
       <h2>Nothing in the queue yet</h2>
-      <p>Fetching pulls London legal and compliance postings from Reed and Adzuna,
+      <p>Fetching pulls postings matching your target titles from Reed and Adzuna,
          scores them against your profile, and drops duplicates. It takes about a minute.</p>
       <div class="row">
         <button class="btn btn-primary" data-empty-fetch>Fetch new listings</button>

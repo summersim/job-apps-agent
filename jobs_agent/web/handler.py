@@ -49,6 +49,7 @@ GET_ROUTES = {
 POST_ROUTES = {
     "/api/fetch": api.post_fetch,
     "/api/status": api.post_status,
+    "/api/delete": api.post_delete,
     "/api/draft": api.post_draft,
     "/api/redraft": api.post_redraft,
     "/api/letter": api.post_letter,

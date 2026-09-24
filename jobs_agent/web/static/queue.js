@@ -181,6 +181,7 @@ function card(row, open) {
     const primary = lead === next ? "btn-primary" : "btn-secondary";
     actions.push(`<button class="btn ${primary}" data-key="${key}" data-status="${next}">${label}</button>`);
   }
+  actions.push(`<button class="btn btn-ghost" data-delete-key="${key}">Delete</button>`);
   if (url) {
     actions.push(`<a class="open-listing" href="${url}" target="_blank" rel="noopener">Open listing ↗</a>`);
   }
@@ -238,12 +239,16 @@ async function loadQueue() {
   const limit = el("f-limit").value || 50;
   const minScore = el("f-min-score").value || 0;
   const location = el("f-location").value.trim();
+  const minSalary = el("f-min-salary").value.trim();
+  const maxSalary = el("f-max-salary").value.trim();
   el("stage-title").textContent = STATUS_LABEL[stage];
   el("stage-count").textContent = "";
   el("results").innerHTML = `<p class="empty-line">Loading…</p>`;
 
   const params = new URLSearchParams({ status: stage, limit, min_score: minScore });
   if (location) params.set("location", location);
+  if (minSalary) params.set("min_salary", minSalary);
+  if (maxSalary) params.set("max_salary", maxSalary);
   const res = await fetch(`/api/queue?${params}`);
   const rows = await res.json();
 
@@ -320,10 +325,30 @@ el("results").addEventListener("click", async (ev) => {
   const saveBtn = ev.target.closest("button[data-save-key]");
   const redraftBtn = ev.target.closest("button[data-redraft-key]");
   const submitBtn = ev.target.closest("button[data-submit-key]");
+  const deleteBtn = ev.target.closest("button[data-delete-key]");
   const emptyFetch = ev.target.closest("button[data-empty-fetch]");
 
   if (emptyFetch) {
     fetchListings();
+    return;
+  }
+
+  if (deleteBtn) {
+    if (!confirm("Delete this listing for good? This can't be undone.")) return;
+    deleteBtn.disabled = true;
+    const res = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: deleteBtn.dataset.deleteKey }),
+    });
+    if (res.ok) {
+      setMessage("Listing deleted.");
+      await reload();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.error || "Could not delete the listing.", "error");
+      deleteBtn.disabled = false;
+    }
     return;
   }
 
@@ -441,6 +466,8 @@ el("f-location").addEventListener("keydown", (ev) => {
 });
 el("f-limit").addEventListener("change", () => { setMessage(""); loadQueue(); });
 el("f-min-score").addEventListener("change", () => { setMessage(""); loadQueue(); });
+el("f-min-salary").addEventListener("change", () => { setMessage(""); loadQueue(); });
+el("f-max-salary").addEventListener("change", () => { setMessage(""); loadQueue(); });
 
 async function fetchListings() {
   const btn = el("btn-fetch");

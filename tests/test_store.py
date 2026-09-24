@@ -52,6 +52,42 @@ def test_queue_filters_by_status_and_location(store):
     assert len(list(store.queue(status="approved"))) == 0
 
 
+def test_queue_filters_by_compensation_range(store):
+    # Distinct titles/descriptions so the soft-dedupe in upsert() doesn't
+    # collapse these into one posting.
+    store.upsert([make_posting(
+        title="Compliance Analyst", description="Sanctions screening role.",
+        salary_min=40000, salary_max=50000,
+    )])
+    store.upsert([make_posting(
+        title="Senior Compliance Manager", description="Leads the AML team.",
+        source_id="2", salary_min=70000, salary_max=90000,
+    )])
+    store.upsert([make_posting(
+        title="Paralegal", description="Bundling and disclosure work.",
+        source_id="3", salary_min=None, salary_max=None,
+    )])
+
+    assert len(list(store.queue(min_salary=60000))) == 1
+    assert len(list(store.queue(max_salary=55000))) == 1
+    assert len(list(store.queue(min_salary=45000, max_salary=80000))) == 2
+    assert len(list(store.queue(min_salary=100000))) == 0
+    assert len(list(store.queue())) == 3
+
+
+def test_delete_posting_removes_it_and_its_application(store):
+    p = make_posting()
+    store.upsert([p])
+    assert store.delete_posting(p.key) is True
+    assert store.get_posting(p.key) is None
+    assert store.get_application(p.key) is None
+    assert store.stats() == {}
+
+
+def test_delete_unknown_posting_is_a_noop(store):
+    assert store.delete_posting("nope") is False
+
+
 def test_documents_and_files_overwrite_in_place(store):
     store.set_document("cv", "first")
     store.set_document("cv", "second")

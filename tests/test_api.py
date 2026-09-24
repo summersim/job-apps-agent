@@ -60,6 +60,25 @@ def test_unknown_posting_is_a_404(store):
     assert res.status == 404
 
 
+# -- delete -----------------------------------------------------------------
+
+def test_delete_removes_the_posting(store, staged):
+    res = api.post_delete(store, req(key=staged))
+    assert res.status == 200
+    assert store.get_posting(staged) is None
+    assert store.get_application(staged) is None
+
+
+def test_delete_unknown_posting_is_a_404(store):
+    res = api.post_delete(store, req(key="nope"))
+    assert res.status == 404
+
+
+def test_delete_missing_key_is_rejected(store):
+    res = api.post_delete(store, req())
+    assert res.status == 400
+
+
 # -- drafting guards ------------------------------------------------------
 
 def test_draft_requires_a_cv_and_a_template(store, staged):
@@ -143,3 +162,4 @@ def test_reset_restores_the_defaults(store):
     assert load_profile(store) != DEFAULT_PROFILE
     assert api.post_profile_reset(store, api.Request()).status == 200
     assert load_profile(store) == DEFAULT_PROFILE
+

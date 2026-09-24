@@ -66,6 +66,15 @@ class Request:
         except ValueError:
             return default
 
+    def float_param(self, name: str) -> float | None:
+        raw = self.param(name).strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
 
 @dataclass
 class Json:
@@ -100,6 +109,8 @@ def get_queue(store: Store, req: Request) -> Json:
         min_score=req.int_param("min_score", 0),
         limit=req.int_param("limit", 50),
         location=req.param("location").strip() or None,
+        min_salary=req.float_param("min_salary"),
+        max_salary=req.float_param("max_salary"),
     )
     return Json([_row_to_dict(r) for r in rows])
 
@@ -154,6 +165,15 @@ def post_status(store: Store, req: Request) -> Json:
         return error("Approve the application before marking it submitted.")
 
     store.set_status(key, status)
+    return Json({"ok": True})
+
+
+def post_delete(store: Store, req: Request) -> Json:
+    key = req.payload.get("key")
+    if not key:
+        return error("missing key")
+    if not store.delete_posting(key):
+        return error("unknown posting", 404)
     return Json({"ok": True})
 
 
@@ -316,3 +336,4 @@ def _profile_from_text(payload: dict, *, base):
     if "experience_blockers" in payload:
         changes["experience_blockers"] = parse_lines(payload["experience_blockers"])
     return replace(base, **changes)
+

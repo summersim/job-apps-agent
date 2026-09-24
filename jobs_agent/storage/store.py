@@ -116,7 +116,9 @@ class Store:
         return new, dup
 
     def queue(self, min_score: int = 0, limit: int = 50,
-              status: str = "new", location: str | None = None) -> Iterator[DictRow]:
+              status: str = "new", location: str | None = None,
+              min_salary: float | None = None,
+              max_salary: float | None = None) -> Iterator[DictRow]:
         query = """SELECT p.*, a.status, a.letter, a.notes, a.updated FROM postings p
                  JOIN applications a ON a.user_id = p.user_id AND a.posting_key = p.key
                  WHERE p.user_id = %s AND a.status = %s AND p.score >= %s"""
@@ -124,6 +126,16 @@ class Store:
         if location:
             query += " AND p.location LIKE %s"
             params.append(f"%{location}%")
+        # A posting's pay is a range (salary_min/max), often with only one end
+        # stated, so a comp filter checks for overlap against whichever end is
+        # there rather than requiring both. Nothing stated at all can't be
+        # known to overlap, so it's excluded once either bound is filtered on.
+        if min_salary is not None:
+            query += " AND COALESCE(p.salary_max, p.salary_min) >= %s"
+            params.append(min_salary)
+        if max_salary is not None:
+            query += " AND COALESCE(p.salary_min, p.salary_max) <= %s"
+            params.append(max_salary)
         query += " ORDER BY p.score DESC, p.first_seen DESC LIMIT %s"
         params.append(limit)
         yield from self.conn.execute(query, params)
@@ -164,6 +176,26 @@ class Store:
             (letter, datetime.utcnow().isoformat(), self.user_id, key),
         )
         self.conn.commit()
+
+    def delete_posting(self, key: str) -> bool:
+        """Remove a posting and its application row for good — unlike
+        "rejected" (still in the queue, just set aside), this is permanent.
+
+        Deletes the application row first: it has a foreign key on the
+        posting.
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM applications WHERE user_id=%s AND posting_key=%s",
+            (self.user_id, key),
+        )
+        cur.execute(
+            "DELETE FROM postings WHERE user_id=%s AND key=%s",
+            (self.user_id, key),
+        )
+        deleted = cur.rowcount > 0
+        self.conn.commit()
+        return deleted
 
     # -- documents and files ----------------------------------------------
 
